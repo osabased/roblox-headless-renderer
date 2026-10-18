@@ -2,11 +2,13 @@
 """UI that code builds: a story file is run in its Rojo project and drawn.
 
 `tests/fixtures/rojo_stories/` is a place project with a tiny UI helper standing in
-for a UI library (Packages/Mini.luau) and one story per form: a function(target)
+for a UI library (Packages/Mini.luau), a package linked by string require the way
+pesde links them (Packages/Tag.luau), and one story per form: a function(target)
 that reads sizes and tweens (Badge), a UI Labs table with controls (Panel), one that
-sizes itself from the screen (Viewport), one that fails (Broken) and one that
-reaches for Lune's own globals (Escape). `tests/fixtures/rojo_wrapped/` is a place
-whose default.project.json only wraps common.project.json.
+sizes itself from the screen (Viewport), one that uses the package (Tagged), one
+that fails (Broken), one whose require leads nowhere (Missing) and one that reaches
+for Lune's own globals (Escape). `tests/fixtures/rojo_wrapped/` is a place whose
+default.project.json only wraps common.project.json.
 
     python tests/test_story.py
 """
@@ -75,6 +77,16 @@ def main() -> int:
               f"target.AbsoluteSize: {nodes.get('Viewport/Target/Bar', {}).get('rect')}")
         size = nodes.get("Viewport/Target/Size", {}).get("text", {}).get("content")
         check(size == "800x600", f"CurrentCamera.ViewportSize: {size!r}")
+
+    print("story: string requires, as pesde links packages")
+    doc = layout("Tagged.story.luau")
+    if doc:
+        tag = doc["rects"].get("Tagged/Target/Tag")
+        check(tag == {"x": 10.0, "y": 20.0, "w": 120.0, "h": 28.0}, f"./, ../ and @self/ lead to the package: {tag}")
+    proc = run(["layout", str(STORIES / "Missing.story.luau")])
+    check(proc.returncode == 2 and 'require("./NotThere")' in proc.stderr
+          and re.search(r"at src[\\/]Missing\.story\.luau:2", proc.stderr) is not None,
+          f"a path that leads nowhere is an error at its line: {proc.stderr.strip()[-300:]}")
 
     print("story: check, and a picture")
     proc = run(["check", str(STORIES / "Panel.story.luau")])

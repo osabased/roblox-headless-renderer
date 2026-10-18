@@ -5,8 +5,8 @@ ModuleScript in a Rojo project, in any of the usual forms: a function(target)
 (Hoarcekat, UI Labs), a UI Labs table (react + reactRoblox, roact, fusion, vide, or a
 generic render), a Flipbook table. RHR builds the project with Rojo, finds the story's
 ModuleScript with `rojo sourcemap`, runs it in Lune with a copy of the Roblox side
-(luau/story-runtime.luau: instances, events, the services UI code touches,
-instance-based require), and saves the UI it built as a model file, which the
+(luau/story-runtime.luau: instances, events, the services UI code touches, require by
+instance or relative path), and saves the UI it built as a model file, which the
 command then reads like any other. Nothing about a UI library is special-cased: they
 all end in Instance.new and property sets.
 

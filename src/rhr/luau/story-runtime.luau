@@ -6,9 +6,10 @@
 -- root) is the story's ModuleScript in it. Every UI library ends in the same calls
 -- (Instance.new, set properties, parent), so this copies the Roblox side, not any
 -- library: Lune's own instances (properties, datatypes, Enums, saving), plus events,
--- the services UI code touches, instance-based require, and a frame loop that lets
--- the UI settle. Story forms: function(target) (Hoarcekat, UI Labs); UI Labs tables
--- with react/reactRoblox, roact, fusion, vide or a generic render; Flipbook's table.
+-- the services UI code touches, require by instance or relative path, and a frame
+-- loop that lets the UI settle. Story forms: function(target) (Hoarcekat, UI Labs);
+-- UI Labs tables with react/reactRoblox, roact, fusion, vide or a generic render;
+-- Flipbook's table.
 -- Scripts' own threads are left behind: the process exits once the UI is saved.
 local roblox = require("@lune/roblox")
 local fs = require("@lune/fs")
@@ -256,7 +257,37 @@ playerGui.Parent = localPlayer
 local loaded, loading = {}, {}
 local base
 
+-- Roblox's require-by-string (pesde's package links use it): ./x is a sibling of the
+-- requiring script, ../x a sibling of its parent, @self/x its child.
+local function resolvePath(path, from)
+	local node, rest
+	if string.sub(path, 1, 6) == "@self/" then
+		node, rest = from, string.sub(path, 7)
+	elseif string.sub(path, 1, 2) == "./" or string.sub(path, 1, 3) == "../" then
+		node, rest = from.Parent, path
+	else
+		error(`require("{path}") is not supported when running a story (only paths that start with ./, ../ or @self/)`, 4)
+	end
+	for segment in string.gmatch(rest, "[^/]+") do
+		local nextNode = node
+		if segment == ".." then
+			nextNode = node.Parent
+		elseif segment ~= "." then
+			nextNode = node:FindFirstChild(segment)
+		end
+		if nextNode == nil then
+			local missing = if segment == ".." then "no parent" else `no child named {segment}`
+			error(`require("{path}"): {node:GetFullName()} has {missing}`, 4)
+		end
+		node = nextNode
+	end
+	return node
+end
+
 local function requireModule(target, from)
+	if type(target) == "string" then
+		target = resolvePath(target, from)
+	end
 	if typeof(target) ~= "Instance" then
 		error(`require({typeof(target)}) is not supported when running a story (only ModuleScripts in the project)`, 3)
 	end
