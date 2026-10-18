@@ -6,10 +6,11 @@ for a UI library (Packages/Mini.luau), a package linked by string require the wa
 pesde links them (Packages/Tag.luau), and one story per form: a function(target)
 that reads sizes and tweens (Badge), a UI Labs table with controls (Panel), one that
 sizes itself from the screen (Viewport), one that uses the package (Tagged), one
-that calls Roblox's profiler every frame (Profiled), one that fails (Broken), one
-whose require leads nowhere (Missing) and one that reaches for Lune's own globals
-(Escape). `tests/fixtures/rojo_wrapped/` is a place whose default.project.json only
-wraps common.project.json.
+that calls Roblox's profiler every frame (Profiled), one that sets a legacy Font and
+a FontFace (Fonts), one that fails (Broken), one whose require leads nowhere
+(Missing) and one that reaches for Lune's own globals (Escape).
+`tests/fixtures/rojo_wrapped/` is a place whose default.project.json only wraps
+common.project.json.
 
     python tests/test_story.py
 """
@@ -94,6 +95,20 @@ def main() -> int:
     bar = json.loads(proc.stdout)["rects"].get("Profiled/Target/Bar") if proc.returncode == 0 else None
     check(bar is not None and bar["w"] == 100.0 and "attempt to call" not in proc.stderr,
           f"debug.profilebegin and the memory categories do nothing: {bar} {proc.stderr.strip()[-300:]}")
+
+    print("story: a FontFace set after a legacy Font, the order UI libraries with defaults set them")
+    from rhr.cli import ir_for
+    from rhr.ir import load_ir, resolve_path
+
+    roots = load_ir(ir_for(STORIES / "Fonts.story.luau", viewport=(800, 600)))["roots"]
+    face = resolve_path(roots, "Fonts/Target/Face")["props"].get("FontFace", {})
+    check((face.get("family"), face.get("weight")) == ("rbxasset://fonts/families/BuilderSans.json",
+                                                       "Enum.FontWeight.Bold"),
+          f"the FontFace is kept: {face}")
+    legacy = resolve_path(roots, "Fonts/Target/Legacy")["props"].get("FontFace", {})
+    check((legacy.get("family"), legacy.get("weight")) == ("rbxasset://fonts/families/GothamSSm.json",
+                                                           "Enum.FontWeight.Bold"),
+          f"a legacy Font alone is drawn as its FontFace: {legacy}")
 
     print("story: check, and a picture")
     proc = run(["check", str(STORIES / "Panel.story.luau")])

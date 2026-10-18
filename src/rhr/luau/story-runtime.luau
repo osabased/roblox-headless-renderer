@@ -499,12 +499,16 @@ end
 frames(30)
 
 -- Lune keeps a legacy `Font = Enum.Font.X` as an EnumItem it cannot save: as a FontFace.
+-- Roblox keeps whichever of the two was set last, which Lune does not record; UI
+-- libraries with defaults (Vide's) set a legacy Font before the story's FontFace, so a
+-- FontFace other than the default wins.
+local DEFAULT_FACE = roblox.Instance.new("TextLabel").FontFace
 for _, instance in screen:GetDescendants() do
 	if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
 		local okFont, legacy = pcall(function()
 			return instance.Font -- (reading it fails unless a story set it)
 		end)
-		if okFont and nativeTypeof(legacy) == "EnumItem" then
+		if okFont and nativeTypeof(legacy) == "EnumItem" and instance.FontFace == DEFAULT_FACE then
 			instance.FontFace = roblox.Font.fromEnum(legacy)
 		end
 	end
