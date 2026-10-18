@@ -2,8 +2,9 @@
 
 `rhr <command> <project>` accepts a `*.project.json` file, or a directory that holds
 `default.project.json`, anywhere a .rbxm/.rbxl file is accepted. The project is built
-into the RHR cache (a place when its tree root is a DataModel, a model otherwise)
-and everything after that is the normal Roblox-file path.
+into the RHR cache (a place when its tree root is a DataModel, declared there or in
+the project its root `$path` names; a model otherwise) and everything after that is
+the normal Roblox-file path.
 """
 
 from __future__ import annotations
@@ -80,6 +81,25 @@ def inputs_digest(project: Path) -> str:
     return digest.hexdigest()
 
 
+def root_class(project: Path, tree: dict) -> str | None:
+    """The class at the root of a project's tree: its $className, else the root class
+    of the project its root $path names (a default.project.json often only wraps
+    another project file); None when neither says."""
+    seen: set[Path] = set()
+    while "$className" not in tree:
+        seen.add(project.resolve())
+        path = tree.get("$path")
+        nested = project_file(project.parent / path) if isinstance(path, str) else None
+        if nested is None or nested.resolve() in seen:
+            return None
+        try:
+            tree = json.loads(nested.read_text(encoding="utf-8")).get("tree") or {}
+        except (OSError, ValueError, AttributeError):
+            return None
+        project = nested
+    return tree["$className"]
+
+
 def build(project: Path, out_dir: Path) -> Path:
     """Run `rojo build` on `project` and return the built .rbxl or .rbxm file; the last
     build again while nothing it reads has changed (inputs_digest)."""
@@ -89,8 +109,7 @@ def build(project: Path, out_dir: Path) -> Path:
         data = json.loads(project.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"{project} is not valid JSON: {exc}") from None
-    tree = data.get("tree") or {}
-    is_place = tree.get("$className") == "DataModel"
+    is_place = root_class(project, data.get("tree") or {}) == "DataModel"
     name = data.get("name") or project.name.removesuffix(".project.json")
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.rojo{'.rbxl' if is_place else '.rbxm'}"

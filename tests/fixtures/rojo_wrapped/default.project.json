@@ -1,0 +1,6 @@
+{
+  "name": "WrappedFixture",
+  "tree": {
+    "$path": "common.project.json"
+  }
+}

@@ -5,7 +5,8 @@
 for a UI library (Packages/Mini.luau) and one story per form: a function(target)
 that reads sizes and tweens (Badge), a UI Labs table with controls (Panel), one that
 sizes itself from the screen (Viewport), one that fails (Broken) and one that
-reaches for Lune's own globals (Escape).
+reaches for Lune's own globals (Escape). `tests/fixtures/rojo_wrapped/` is a place
+whose default.project.json only wraps common.project.json.
 
     python tests/test_story.py
 """
@@ -24,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RHR = [sys.executable, "-m", "rhr"]
 STORIES = ROOT / "tests" / "fixtures" / "rojo_stories" / "src"
+WRAPPED = ROOT / "tests" / "fixtures" / "rojo_wrapped" / "src"
 
 failures: list[str] = []
 
@@ -108,6 +110,12 @@ def main() -> int:
     proc = run(["layout", str(STORIES / "Escape.story.luau")])
     check(proc.returncode == 2 and "getfenv is not available" in proc.stderr,
           f"refused: {proc.stderr.strip()[-200:]}")
+
+    print("story: in a project whose default.project.json wraps another")
+    proc = run(["layout", str(WRAPPED / "Card.story.luau"), "--viewport", "800x600"])
+    card = json.loads(proc.stdout)["rects"].get("Card/Target/Card") if proc.returncode == 0 else None
+    check(card == {"x": 40.0, "y": 40.0, "w": 160.0, "h": 90.0},
+          f"runs in the place it wraps: {card} {proc.stderr.strip()[-300:] if proc.returncode else ''}")
 
     print("story: outside a Rojo project")
     with tempfile.TemporaryDirectory(prefix="rhr-story-loose-") as directory:

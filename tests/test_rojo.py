@@ -4,7 +4,8 @@
 `tests/fixtures/rojo_hud/` is a model project: a ScreenGui with a Frame declared
 inline and a TextLabel from a `.model.json` file. The directory and its
 default.project.json both work as input to layout, render, check and ir; without
-`rojo` on PATH the CLI says how to install it.
+`rojo` on PATH the CLI says how to install it. `tests/fixtures/rojo_wrapped/` is a
+place whose default.project.json only wraps common.project.json.
 
     python tests/test_rojo.py
 """
@@ -21,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RHR = [sys.executable, "-m", "rhr"]
 PROJECT_DIR = ROOT / "tests" / "fixtures" / "rojo_hud"
+WRAPPED_DIR = ROOT / "tests" / "fixtures" / "rojo_wrapped"
 
 failures: list[str] = []
 
@@ -46,6 +48,14 @@ def main() -> int:
                   f"inline Frame from the project tree: {layout.get('RojoHud/Panel')}")
             check(layout.get("RojoHud/Panel/Badge") == {"x": 30.0, "y": 40.0, "w": 80.0, "h": 24.0},
                   f"TextLabel from a .model.json file: {layout.get('RojoHud/Panel/Badge')}")
+
+    print("rojo: a default.project.json that wraps another project")
+    proc = run(["layout", str(WRAPPED_DIR), "--viewport", "400x300", "--topbar-height", "0"])
+    check(proc.returncode == 0, f"layout exits 0 {proc.stderr[-300:] if proc.returncode else ''}")
+    if proc.returncode == 0:
+        layout = json.loads(proc.stdout)["rects"]
+        check(layout.get("StarterGui/Hud/Panel") == {"x": 20.0, "y": 30.0, "w": 200.0, "h": 100.0},
+              f"built as the place it wraps: {layout.get('StarterGui/Hud/Panel')}")
 
     with tempfile.TemporaryDirectory(prefix="rhr-rojo-") as directory:
         tmp = Path(directory)
