@@ -376,6 +376,12 @@ for _, name in { "UDim", "UDim2", "Vector2", "Vector3", "Vector2int16", "Vector3
 		base[name] = roblox[name]
 	end
 end
+-- Roblox's profiler and memory categories, which UI libraries call every frame
+-- (Vide's scheduler); Lune's debug library has neither.
+base.debug = table.clone(debug)
+for _, name in { "profilebegin", "profileend", "setmemorycategory", "resetmemorycategory" } do
+	base.debug[name] = function() end
+end
 
 -- Run -----------------------------------------------------------------------------------
 local storyScript = game

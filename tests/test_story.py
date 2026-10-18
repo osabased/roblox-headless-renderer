@@ -6,9 +6,10 @@ for a UI library (Packages/Mini.luau), a package linked by string require the wa
 pesde links them (Packages/Tag.luau), and one story per form: a function(target)
 that reads sizes and tweens (Badge), a UI Labs table with controls (Panel), one that
 sizes itself from the screen (Viewport), one that uses the package (Tagged), one
-that fails (Broken), one whose require leads nowhere (Missing) and one that reaches
-for Lune's own globals (Escape). `tests/fixtures/rojo_wrapped/` is a place whose
-default.project.json only wraps common.project.json.
+that calls Roblox's profiler every frame (Profiled), one that fails (Broken), one
+whose require leads nowhere (Missing) and one that reaches for Lune's own globals
+(Escape). `tests/fixtures/rojo_wrapped/` is a place whose default.project.json only
+wraps common.project.json.
 
     python tests/test_story.py
 """
@@ -87,6 +88,12 @@ def main() -> int:
     check(proc.returncode == 2 and 'require("./NotThere")' in proc.stderr
           and re.search(r"at src[\\/]Missing\.story\.luau:2", proc.stderr) is not None,
           f"a path that leads nowhere is an error at its line: {proc.stderr.strip()[-300:]}")
+
+    print("story: Roblox's profiler calls, made every frame")
+    proc = run(["layout", str(STORIES / "Profiled.story.luau"), "--viewport", "800x600"])
+    bar = json.loads(proc.stdout)["rects"].get("Profiled/Target/Bar") if proc.returncode == 0 else None
+    check(bar is not None and bar["w"] == 100.0 and "attempt to call" not in proc.stderr,
+          f"debug.profilebegin and the memory categories do nothing: {bar} {proc.stderr.strip()[-300:]}")
 
     print("story: check, and a picture")
     proc = run(["check", str(STORIES / "Panel.story.luau")])
