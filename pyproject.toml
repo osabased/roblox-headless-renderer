@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roblox-headless-renderer"
-version = "1.0.0rc1"
+version = "1.0.0rc1+osabased.1"
 description = "Headless previews of Roblox UI and 3D builds for AI agents: PNGs plus layout JSON, no Studio needed."
 readme = "README.md"
 license = "Apache-2.0"
