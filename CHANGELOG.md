@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.0rc1+osabased.1 (fork)
+
+1.0.0rc1 with these fixes, from osabased/roblox-headless-renderer.
+
+### Fixed
+
+- **A project whose default.project.json only wraps another** (`"tree": {"$path":
+  "common.project.json"}`, a common Rojo layout) is built as the place it wraps. It
+  was built as a model: its UI was keyed under the project's name, and a story in it
+  failed with "DataModel can not be reparented".
+- **Stories require by relative path** as well as by instance: `./x` (a sibling of
+  the requiring script), `../x` (a sibling of its parent) and `@self/x` (its child),
+  as Roblox's require-by-string does and pesde links packages. Any other string (an
+  alias like `@packages/x`), or a path that leads nowhere, is an error at the line
+  that required it.
+- **Roblox's profiler does nothing in a story**: `debug.profilebegin` and
+  `profileend` (Vide calls them every frame), `setmemorycategory` and
+  `resetmemorycategory`. They failed with "attempt to call a nil value".
+- **A FontFace set after a legacy Font is kept.** UI libraries with defaults set
+  `Font` first (Vide sets `Font = SourceSans` on every text instance), so a story's
+  `FontFace` was lost and its text drawn in Source Sans. Lune does not record which
+  of the two was set last: a legacy Font now becomes the FontFace only while the
+  FontFace is the default, so a story that sets a FontFace and then a legacy Font
+  draws the FontFace, where Roblox draws the legacy Font.
+
 ## 1.0.0rc1 (release candidate)
 
 ### When upgrading
