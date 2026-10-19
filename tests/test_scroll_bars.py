@@ -303,7 +303,7 @@ def edges_screen(cells: Cells) -> list[dict]:
     ])
 
 
-def check_case(img, rects, scroll, case: dict, studio) -> list[str]:
+def check_case(img, rects, scroll, case: dict, studio, gui: str = GUI) -> list[str]:
     (ww, wh), (cw, ch), (cpx, cpy), children = studio
     (fx, fy), w, h, t, pad, left = case["screen"], case["w"], case["h"], case["t"], case["pad"], case["left"]
     v_shown, h_shown = w - ww == t, h - wh == t
@@ -319,7 +319,7 @@ def check_case(img, rects, scroll, case: dict, studio) -> list[str]:
             if not near(got, want):
                 problems.append(f"{label} {fmt(got)}, Studio {fmt(want)}")
 
-    path = f"{GUI}/{case['path']}"
+    path = f"{gui}/{case['path']}"
     content_rects = {f"{path}/{name}": (fx + x, fy + y, width, height)
                      for name, (x, y, width, height) in children.items()}
     if case["probe"]:

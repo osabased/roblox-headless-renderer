@@ -384,7 +384,7 @@ pixel for pixel the same as one on a fresh page (tests/test_kept_page.py).
 
 ## In-world UI (BillboardGui, SurfaceGui)
 
-The GUI inside them is drawn by the same engine as screen UI, on the canvas size
+The GUI inside them is laid out and drawn as screen UI is, on the canvas size
 Roblox would give it. BillboardGui placement and size match Studio's camera
 projection (measured in play mode). SurfaceGui face orientation was measured in
 Studio for every face.
@@ -393,10 +393,10 @@ Approximate: a panel partly hidden behind geometry is drawn whole or not at all 
 ray to its anchor decides). Canvases larger than 4096 px per side are clamped.
 `LightInfluence` and `Brightness` are not applied.
 
-A ScrollingFrame here is laid out by the engine alone, not by RHR's layout pass: it
-draws no scroll bars and leaves no room for them, and it reads CanvasPosition as a
-share of the scroll range, so one scrolled by a pixel or more shows the end of its
-canvas.
+A ScrollingFrame here scrolls as on screen. Measured in Studio on 2026-10-19 in a
+SurfaceGui and a BillboardGui (tests/test_inworld_scroll.py holds the cases): each
+frame's window, canvas, CanvasPosition, children and scroll bars came out as in a
+ScreenGui, and RHR draws them by the same rules (ScrollingFrame, under UI layout).
 
 ## ViewportFrame
 

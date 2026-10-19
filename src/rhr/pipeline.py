@@ -122,8 +122,10 @@ def render_object(
     icons_dir=None,
     root_rect=None,
     draw: bool = True,
+    out: dict | None = None,
 ) -> Path | None:
-    """Draw one pane to `out_path`; with `draw` False only lay it out (rect_map)."""
+    """Draw one pane to `out_path`; with `draw` False only lay it out (rect_map).
+    `out` gets the bounds of what a `_crop` node and its descendants draw (crop_rect)."""
     from rhr.ui_engine.renderer import render_json
 
     layout_rects = obj.pop("_layoutRects", None) if isinstance(obj, dict) else None
@@ -147,6 +149,7 @@ def render_object(
         layout_scroll=layout_scroll,
         safe_area=safe_area,
         draw=draw,
+        out=out,
     )
     return out_path if draw else None
 
@@ -410,7 +413,7 @@ def load_screens(
         inset = insets.for_nodes(outside, topbar_height=topbar)
         x, y, w, h = inset.rect(width, height)
         obj = to_pinevex_object(outside, postprocess)
-        _attach_layout(obj, pane, ir_by_path, (x, y, w, h))
+        _attach_layout(obj, ir_by_path.get(pane.get("_path")), (x, y, w, h))
         return [(obj, Rect(x, y, w, h), inset, Path(ir_path).stem)]
 
     # Bottom pane first: the UI outside the ScreenGuis (what a ScreenGui-less model has
@@ -427,7 +430,7 @@ def load_screens(
         inset = insets.for_nodes([node], topbar_height=topbar)
         x, y, w, h = inset.rect(width, height)
         obj = to_pinevex_object([node], postprocess)
-        _attach_layout(obj, node, ir_by_path, (x, y, w, h))
+        _attach_layout(obj, ir_by_path.get(node.get("_path")), (x, y, w, h))
         if node.get("className") == "ScreenGui":
             area = insets.safe_area(node.get("properties") or {}, width, height)
             if area is not None:
@@ -449,8 +452,8 @@ def _index_paths(roots: list[dict]) -> dict[str, dict]:
     return found
 
 
-def _attach_layout(obj: dict, pane: dict | None, ir_by_path: dict[str, dict], rect) -> None:
-    """Lay the pane out with rhr.ui_layout and hand the rects to the engine.
+def _attach_layout(obj: dict, ir_node: dict | None, rect) -> None:
+    """Lay the pane's IR node out with rhr.ui_layout and hand the rects to the engine.
 
     The engine draws at these rects (obj["_layoutRects"], read by render_object), with
     each ScrollingFrame's window and bars (obj["_layoutScroll"]); its own layout code
@@ -461,7 +464,6 @@ def _attach_layout(obj: dict, pane: dict | None, ir_by_path: dict[str, dict], re
 
     from rhr.ui_layout import lay_out_pane
 
-    ir_node = ir_by_path.get((pane or {}).get("_path"))
     if ir_node is None:
         return
     scrolls: dict = {}
@@ -658,15 +660,17 @@ MAX_GUI_CANVAS = 4096
 def render_gui_node(ir, node_path: str, width: int, height: int, out_path) -> tuple[Path, tuple[int, int]]:
     """Render one BillboardGui/SurfaceGui subtree with the 2D engine at width x height.
 
-    In-world UI goes through the same renderer as ScreenGuis, laid out on the canvas
-    size Roblox would give it (the scene page computes that: camera distance for a
-    BillboardGui, face size x PixelsPerStud or CanvasSize for a SurfaceGui). Canvases
-    larger than MAX_GUI_CANVAS per side are clamped (see known-approximations).
+    In-world UI goes through the same layout pass and renderer as ScreenGuis, so its
+    ScrollingFrames get the same windows and bars, laid out on the canvas size Roblox
+    would give it (the scene page computes that: camera distance for a BillboardGui,
+    face size x PixelsPerStud or CanvasSize for a SurfaceGui). Canvases larger than
+    MAX_GUI_CANVAS per side are clamped (see known-approximations).
 
     A BillboardGui with ClipsDescendants off draws its children past its own size, as
     in Roblox: a 1-stud billboard with a label five times as wide shows the whole
-    label. The picture is then larger than width x height; returns it with the
-    offset (left, top) of the billboard's own area inside it.
+    label. The picture then grows to take in what is drawn, less what a clipping frame
+    or a scroll window cuts off, and is larger than width x height; returns it with
+    the offset (left, top) of the billboard's own area inside it.
     """
     import math
 
@@ -679,22 +683,30 @@ def render_gui_node(ir, node_path: str, width: int, height: int, out_path) -> tu
         raise ValueError(f"{node_path} is a {node.get('className')}, not a BillboardGui or SurfaceGui")
     width = max(1, min(int(width), MAX_GUI_CANVAS))
     height = max(1, min(int(height), MAX_GUI_CANVAS))
+
+    def gui_object(rect) -> dict:
+        obj = to_pinevex_object([ir_node_to_raw(node)])
+        _attach_layout(obj, node, rect)
+        return obj
+
     left = top = right = bottom = 0
     if node.get("className") == "BillboardGui" and (node.get("props") or {}).get("ClipsDescendants") is False:
-        rects: dict = {}
-        render_object(to_pinevex_object([ir_node_to_raw(node)]), None, width, height, (0, 0, 0, 0), rect_map=rects,
-                      draw=False)
-        for rect in rects.values():
-            left = max(left, math.ceil(-rect.x))
-            top = max(top, math.ceil(-rect.y))
-            right = max(right, math.ceil(rect.x + rect.w - width))
-            bottom = max(bottom, math.ceil(rect.y + rect.h - height))
+        obj = gui_object((0, 0, width, height))
+        obj["_crop"] = True
+        drawn: dict = {}
+        render_object(obj, None, width, height, (0, 0, 0, 0), draw=False, out=drawn)
+        rect = drawn.get("crop_rect")
+        if rect is not None:
+            left = max(0, math.ceil(-rect.x))
+            top = max(0, math.ceil(-rect.y))
+            right = max(0, math.ceil(rect.x + rect.w - width))
+            bottom = max(0, math.ceil(rect.y + rect.h - height))
         spare_w = max(0, MAX_GUI_CANVAS - width)
         spare_h = max(0, MAX_GUI_CANVAS - height)
         left, right = min(left, spare_w // 2), min(right, spare_w // 2)
         top, bottom = min(top, spare_h // 2), min(bottom, spare_h // 2)
     grown = left or top or right or bottom
-    out = render_object(to_pinevex_object([ir_node_to_raw(node)]), out_path, width + left + right, height + top + bottom,
+    out = render_object(gui_object((left, top, width, height)), out_path, width + left + right, height + top + bottom,
                         (0, 0, 0, 0), root_rect=Rect(left, top, width, height) if grown else None)
     return out, (left, top)
 
