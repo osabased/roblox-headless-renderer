@@ -140,6 +140,25 @@ with its background, and under `Sibling` also cut off at the group's edge); `Glo
 in a BillboardGui or SurfaceGui (the ScreenGui rules). UI outside any ScreenGui is
 drawn as `Sibling`.
 
+**UIGradient.** Measured in Studio on 2026-10-18; tests/test_gradient_rotation.py
+holds the Rotation and text cases, each within half a degree and 1 px of Studio.
+
+- The ramp is centred on the object and runs at `Rotation`, in screen pixels. Along
+  an axis it spans the object's width or height. Off the axes it spans the object's
+  inscribed ellipse, sqrt((w cos R)^2 + (h sin R)^2) at a Rotation R, so the corners
+  take the end colours: at 45 degrees a 172 x 100 Frame ramps over 140.5 px, where a
+  ramp that just reaches the corners would be 192.
+- On a TextLabel the ramp spans the label, not its text, at the gradient's own
+  `Rotation`.
+- `Offset` at Rotation 0 moves the ramp along by that share of the width.
+
+Not followed: a UIStroke's gradient spans the object in RHR, where Studio's runs
+longer. With a 4 px Outer stroke on a 140 px wide Frame, Studio ramps over 152 px,
+centred, so RHR reaches the end colours 6 px sooner at each end; one case cannot tell
+which rule Studio follows. Not measured, and drawn by the rules above: other sizes and
+angles off the axes, `Offset` with a `Rotation`, text off the axes, a UIStroke's
+gradient at other thicknesses, positions or rotations, and a text stroke's gradient.
+
 ## Text
 
 **Measured:** Roblox makes `TextSize` the full line height (ascent + descent), not

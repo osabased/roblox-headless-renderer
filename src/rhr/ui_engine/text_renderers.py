@@ -595,17 +595,10 @@ def draw_text(canvas: skia.Canvas, x: float, y: float, w: float, h: float,
     if not text:
         return
 
-    text_gradient = gradient
-    if gradient is not None:
-        text_gradient = dict(gradient)
-        text_gradient["rotation"] = (
-            float(gradient.get("rotation", 0.0)) + _TEXT_GRADIENT_ROTATION_OFFSET_DEG
-        )
-
     if node.get("richText"):
-        _draw_text_rich(canvas, x, y, w, h, node, fonts_dir, text_gradient)
+        _draw_text_rich(canvas, x, y, w, h, node, fonts_dir, gradient)
     else:
-        _draw_text_plain(canvas, x, y, w, h, node, fonts_dir, text_gradient)
+        _draw_text_plain(canvas, x, y, w, h, node, fonts_dir, gradient)
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

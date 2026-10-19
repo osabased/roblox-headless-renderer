@@ -141,8 +141,9 @@ def make_gradient_shader(
     rad = math.radians(rotation_deg)
     cos_r = math.cos(rad)
     sin_r = math.sin(rad)
-    # Cover-line model: keep exact angle and ensure the gradient line spans the element.
-    half_len = (w * abs(cos_r) + h * abs(sin_r)) / 2.0
+    # Roblox spans the ramp across the box's inscribed ellipse, not its bounding
+    # line, so off-axis the corners take the end colours.
+    half_len = math.hypot(w * cos_r, h * sin_r) / 2.0
     dx = cos_r * half_len
     dy = sin_r * half_len
     start = skia.Point(cx - dx, cy - dy)
