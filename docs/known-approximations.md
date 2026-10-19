@@ -202,12 +202,17 @@ file uses that are not cached, as the Roblox Studio user (the original file, at 
 size); `preview` downloads the world's and its in-world UI's, not its ScreenGuis'.
 `--offline` skips that. Without a Studio login an image comes from Roblox's thumbnail
 service instead, at most 420 px, which puts sprite-sheet crops (`ImageRectOffset`,
-measured in the original's pixels) in the wrong place. ScrollingFrame bar images have
-their own rules (ScrollingFrame, under UI layout).
+measured in the original's pixels) in the wrong place. An image RHR could not
+download (no Studio login, a failed connection) is asked for again on the next render;
+one Roblox refused, a day later. An asset id that is not an Image's (a Decal's, a
+Model's or a sound's) draws as nothing in Roblox, though Roblox's thumbnail service has
+a picture for it, and RHR leaves it out too. ScrollingFrame bar images have their own
+rules (ScrollingFrame, under UI layout).
 
 An image RHR cannot draw leaves its area empty, with no stand-in, and the report's
 `missingAssets` lists it with the reason: an asset id not downloaded (`offline` with
-`--offline`), one Roblox refused, a file built into the Roblox client (`rbxasset://`),
+`--offline`), one Roblox refused or that is not an image, a file built into the Roblox
+client (`rbxasset://`),
 which the UI renderer does not read, a `rbxthumb://` thumbnail, which Roblox makes at
 run time, or a link RHR does not read. Only an image the picture would show is listed:
 not a hidden or fully transparent one, one clipped away or off the screen, a

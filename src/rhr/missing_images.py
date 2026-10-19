@@ -64,6 +64,8 @@ def download_hint(why: str) -> str | None:
 
     if why == fetch.UNAVAILABLE:
         return "Roblox draws nothing for it either (deleted, private or moderated): use another image"
+    if why.startswith("not an image"):
+        return "Roblox draws nothing for it either: use the id of an Image (a Decal's Texture holds one)"
     if "no thumbnail" in why:
         return "RHR asks Roblox again a day after it last asked"
     if "offline" in why:

@@ -336,13 +336,18 @@ def check_grades(check) -> None:
     from rhr import fetch
 
     final = (fetch.UNAVAILABLE, why(fetch._refused(404, "Asset not found", signed_in=True)),
-             why(fetch._refused(409, "Conflict", signed_in="API key")), "not an image: UnidentifiedImageError")
+             why(fetch._refused(409, "Conflict", signed_in="API key")), "not an image: UnidentifiedImageError",
+             fetch._MODEL_FILE)
     ours = (why(fetch._NO_LOGIN), why(fetch._refused(401, "", signed_in=False)),
             why(fetch._refused(403, "Unauthorized", signed_in=True)), "signed-in download needs Lune: not found",
             "download: HTTP 404", "download: <urlopen error timed out>", "no thumbnail")
     check(all(map(refused_by_roblox, final)) and not any(map(refused_by_roblox, ours)),
           f"check: Roblox's final refusals are warnings, a fetch that failed on rhr's side info "
           f"({[r for r in final if not refused_by_roblox(r)]}, {[r for r in ours if refused_by_roblox(r)]})")
+    from rhr.missing_images import download_hint
+
+    hint = download_hint(fetch._MODEL_FILE) or ""
+    check("id of an Image" in hint, f"check: the id of a Decal or a Model says to use an Image's ({hint!r})")
     nested = why("missing (signed in: timed out (os error 10060))")
     check(nested == "signed in: timed out (os error 10060)", f"check: a reason keeps its own parentheses ({nested!r})")
 

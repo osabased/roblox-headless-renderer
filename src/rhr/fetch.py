@@ -275,12 +275,31 @@ def _destination(kind: str, asset: str) -> Path:
 UNAVAILABLE = "Roblox shows it as unavailable"
 UNAVAILABLE_THUMBNAILS = {"e5bef3179d5ce82a42fdc8ddc83a2ba9", "b566251226e913461da0d9d16687e93f"}
 
+# An id that is not an Image (a Decal's, a Model's, a sound's) draws as nothing in
+# Roblox (ContentProvider:PreloadAsync fails on it, 2026-10-19), but the thumbnail
+# service answers it with a picture: the decal's image, the model's render, a speaker
+# icon. The picture's URL names the asset type (Image, Decal, Model, UnknownImage for
+# a union, GameIcon4 and the like), except the speaker's (a fixed file).
+AUDIO_THUMBNAILS = {"815fe821c9f3c387d44083aee277db71"}
+_THUMBNAIL_TYPE = re.compile(r"/\d+/\d+/([A-Za-z0-9]+)/Png/")
+_THUMBNAIL_KINDS = {"Decal": "a Decal", "Model": "a Model", "Audio": "an Audio asset"}
+_MODEL_FILE = "not an image: a model file (the id of a Decal or a Model, not of an Image)"
 
-def _is_unavailable(path: Path) -> bool:
+
+def _not_drawn(path: Path, url: str = "") -> str | None:
+    """Why Roblox draws nothing for the image whose thumbnail (from `url`) is at
+    `path`, or None when it draws the thumbnail's picture."""
     try:
-        return hashlib.md5(path.read_bytes()).hexdigest() in UNAVAILABLE_THUMBNAILS
+        digest = hashlib.md5(path.read_bytes()).hexdigest()
     except OSError:
-        return False
+        return None
+    if digest in UNAVAILABLE_THUMBNAILS:
+        return UNAVAILABLE
+    match = _THUMBNAIL_TYPE.search(url)
+    kind = match.group(1) if match and match.group(1) != "Image" else "Audio" if digest in AUDIO_THUMBNAILS else None
+    if kind is None:
+        return None
+    return f"not an image: the id of {_THUMBNAIL_KINDS.get(kind, 'another kind of asset')}, not of an Image"
 
 
 _SUFFIX = {"images": "png", "meshes": "mesh", "unions": "json", "materials": "png"}
@@ -302,16 +321,21 @@ _SWEPT: set[str] = set()
 
 
 def _sweep_placeholders(folder: Path) -> None:
-    """Remove "image unavailable" placeholders an RHR before 0.7 cached as images
-    (thumbnails are checked when downloaded since), once per cache folder."""
+    """Remove thumbnails an earlier RHR cached that Roblox draws as nothing: "image
+    unavailable" placeholders (before 0.7) and pictures of ids that are not Images
+    (before 1.0.0rc1+osabased.11). Thumbnails are checked when downloaded since. Once
+    per cache folder."""
     if str(folder) in _SWEPT:
         return
     _SWEPT.add(str(folder))
-    marker = folder / ".placeholders-swept-2"
+    marker = folder / ".placeholders-swept-3"
     if marker.exists() or not folder.is_dir():
         return
+    from rhr.ui_engine.asset_fetcher import _load_state
+
+    urls = _load_state(folder)[0]
     for path in folder.glob("*.png"):
-        if _is_unavailable(path):
+        if _not_drawn(path, urls.get(path.stem, "")):
             path.unlink(missing_ok=True)
     try:
         marker.write_text("", encoding="utf-8")
@@ -351,7 +375,7 @@ def _store(kind: str, asset: str, payload: bytes) -> str:
         try:
             mesh = unions.decode(unions.mesh_from_asset(payload))
         except unions.UnionFormatError as exc:
-            return f"missing ({exc})"
+            return f"missing (unreadable union: {exc})"
         _write(destination, json.dumps(unions.to_payload(mesh)).encode())
         return "fetched"
     # images and material maps: stored as PNG whatever Roblox served
@@ -370,6 +394,8 @@ def _store(kind: str, asset: str, payload: bytes) -> str:
                 image.save(buffer, "PNG")
             _write(destination, buffer.getvalue())
     except Exception as exc:  # noqa: BLE001 - any undecodable payload is just "not an image"
+        if payload.startswith(b"<roblox"):
+            return f"missing ({_MODEL_FILE})"
         return f"missing (not an image: {type(exc).__name__})"
     return "fetched"
 
@@ -554,6 +580,17 @@ def _final(where: str) -> bool:
         f"HTTP {code}:" in where for code in (403, 404, 409)) and "signed-in account" not in where
 
 
+def _lasting(status: str) -> bool:
+    """Whether asking again within a day would get the same 'missing (why)': Roblox's
+    own refusal, or a file that is not what it should be. Not a failed connection, a
+    missing login or Lune, a rate limit or a server error (and signing in must count
+    at once)."""
+    why = missing_reason(status)
+    return (why == UNAVAILABLE
+            or why.startswith(("not an image", "invalid gzip", "not a Roblox mesh", "unreadable union"))
+            or bool(re.search(r"HTTP (403|404|409)\b", why)) and "signed-in account" not in why)
+
+
 def _download(location: str, *, timeout: float = 60.0) -> bytes | str:
     """One file from Roblox's CDN: its bytes, or 'missing (why)'."""
     request = urllib.request.Request(location, headers={"User-Agent": _USER_AGENT})
@@ -570,21 +607,24 @@ def _download(location: str, *, timeout: float = 60.0) -> bytes | str:
 
 
 def _thumbnails(ids: set[str], log) -> dict[str, str]:
-    """Images from Roblox's thumbnail service (no sign-in, at most 420 px)."""
-    from rhr.ui_engine.asset_fetcher import fetch_icons
+    """Images from Roblox's thumbnail service (no sign-in, at most 420 px): 'fetched'
+    or 'missing (why Roblox draws nothing)' for each id it has a thumbnail for."""
+    from rhr.ui_engine.asset_fetcher import _load_state, fetch_icons
     from rhr.ui_engine.assets import _asset_cache_dir
 
     cache_dir = _asset_cache_dir(ICONS_DIR)
     for message in fetch_icons(ids, cache_dir):
         log(f"  {message}")
+    urls = _load_state(cache_dir)[0]
     results = {}
     for asset in ids:
         path = cache_dir / f"{asset}.png"
-        if path.is_file() and _is_unavailable(path):
+        if not path.is_file():
+            continue
+        why = _not_drawn(path, urls.get(asset, ""))
+        if why:
             path.unlink(missing_ok=True)
-            results[asset] = f"missing ({UNAVAILABLE})"
-        else:
-            results[asset] = "fetched" if path.is_file() else "missing (no thumbnail)"
+        results[asset] = f"missing ({why})" if why else "fetched"
     return results
 
 
@@ -655,23 +695,25 @@ def ensure(refs: dict[str, set[str]], *, login: bool = True, log=None) -> dict[s
             if kind == "images" and status == "fetched":
                 originals[asset] = True
             if kind == "images" and status != "fetched" and _cached(kind, asset):
-                if status not in (_NO_LOGIN, no_login):
-                    failures[f"original:{asset}"] = {"status": status, "time": now}
-                status = "cached"  # the earlier thumbnail stays
+                if missing_reason(status) == _MODEL_FILE:
+                    _destination(kind, asset).unlink(missing_ok=True)  # a Decal's or Model's thumbnail
+                else:
+                    if status not in (_NO_LOGIN, no_login):
+                        failures[f"original:{asset}"] = {"status": status, "time": now}
+                    status = "cached"  # the earlier thumbnail stays
             results[kind][asset] = status
 
-    # Images nothing else could get: thumbnails, which need no sign-in.
-    thumbs = {a for a, s in results.get("images", {}).items() if s.startswith("missing")}
+    # Images nothing else could get: thumbnails, which need no sign-in. An image whose
+    # thumbnail fails too keeps why its download did.
+    thumbs = {a for a, s in results.get("images", {}).items()
+              if s.startswith("missing") and not missing_reason(s).startswith("not an image")}
     if thumbs:
-        for asset, status in _thumbnails(thumbs, log).items():
-            results["images"][asset] = status
+        results["images"].update(_thumbnails(thumbs, log))
 
     for kind, statuses in results.items():
         for asset, status in statuses.items():
             key = f"{kind}:{asset}"
-            # (Not what a login would get: signing in must not wait a day to count.)
-            if (status.startswith("missing") and "Lune" not in status
-                    and status not in (_NO_LOGIN, no_login)):
+            if status.startswith("missing") and _lasting(status):
                 failures[key] = {"status": status, "time": now}
             else:
                 failures.pop(key, None)
