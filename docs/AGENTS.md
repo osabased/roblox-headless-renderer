@@ -99,7 +99,11 @@ A story is run in the Rojo project above it, with the project's modules (it need
 `rojo`; RHR downloads it). It is the one input where RHR runs code: fine for your own
 project; do not run stories from untrusted pull requests outside a sandbox. A story's
 `target` gets the area a game's own UI gets in Play: below the top bar and inside a
-phone's safe area, with `GuiService:GetGuiInset()` reading the top bar. Code that
+phone's safe area, with `GuiService:GetGuiInset()` reading the top bar. It reads
+the `--device`'s input (UserInputService.PreferredInput and the *Enabled flags) and
+GuiService.ViewportDisplaySize, Roblox's default player settings (PreferredTextSize,
+PreferredTransparency, ReducedMotionEnabled), and a TopbarInset that is the whole top
+bar, since RHR draws none of Roblox's buttons there. Code that
 reads the camera's ViewportSize gets the whole screen (`--viewport`, `--device`),
 where Studio leaves out a phone's notches; other sizes read while the story runs are
 estimates; tweens end at their goal; controls take their defaults; nothing is

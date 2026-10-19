@@ -13,15 +13,21 @@ all end in Instance.new and property sets.
 The story mounts where a game's own UI does in Play: in a default ScreenGui
 (CoreUISafeInsets), below the top bar and inside the device's insets, so
 `target.AbsoluteSize` is that area and `GuiService:GetGuiInset()` reads the top bar.
+It reads the `--device`'s input and player settings as a Studio play-test on that
+device does (desktop without one): UserInputService.PreferredInput and the
+*Enabled flags, GuiService.ViewportDisplaySize, Roblox's default PreferredTextSize,
+PreferredTransparency and ReducedMotionEnabled, and a TopbarInset that is the whole
+top bar between the device's side insets (RHR draws none of Roblox's buttons there).
 
 What does not carry over: other sizes read while the story runs (AbsoluteSize,
 AbsolutePosition) are zero, since RHR lays the UI out afterwards; the camera's
 ViewportSize is the whole screen, where Studio leaves out a notch's side insets;
-tweens end at their goal; the story's controls take their defaults; nothing is
+TextService:GetTextBoundsAsync and GetTextSize are rough estimates; tweens end at
+their goal; the story's controls take their defaults; nothing is
 clicked.
 
 A story is run again only when something it runs on changed (the project's files,
-the screen and its insets, RHR's runtime): `check` then `ui` of the same story runs
+the screen, its insets and device, RHR's runtime): `check` then `ui` of the same story runs
 it once. A story that builds something different each run (random, the clock) keeps
 its first.
 """
@@ -139,10 +145,10 @@ def _tidy(text: str) -> str:
 
 def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: float | None = None,
           log=None) -> Path:
-    """Run `story` on a `width` x `height` screen (the `--device` one's insets, a
-    `topbar_height` top bar, 58 by default) and return the model file with the UI it
-    built."""
-    from rhr import insets, rojo
+    """Run `story` on a `width` x `height` screen (the `--device` one's insets and
+    input, a `topbar_height` top bar, 58 by default) and return the model file with
+    the UI it built."""
+    from rhr import devices, insets, rojo
     from rhr.ir import lune_executable
     from rhr.procs import no_window
 
@@ -152,7 +158,9 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     name = story_name(story)
     topbar = insets.REFERENCE_TOPBAR_HEIGHT if topbar_height is None else float(topbar_height)
     core = insets.resolve("CoreUISafeInsets", topbar)
-    area = json.dumps({"insets": [core.left, core.top, core.right, core.bottom], "topbar": topbar})
+    device = devices.current()
+    area = json.dumps({"insets": [core.left, core.top, core.right, core.bottom], "topbar": topbar,
+                       "input": device.preferred_input, "displaySize": device.display_size})
     key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}".encode("utf-8")).hexdigest()[:12]
     # One folder per story and screen, the file named after the story: documents name
     # their source by this file's name ("model": "Shop.story.json").

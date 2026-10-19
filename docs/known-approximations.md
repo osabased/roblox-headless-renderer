@@ -37,7 +37,10 @@ note on stderr. A story's UI gets the area a game's own UI gets in Play (measure
 Studio's phone emulator on 2026-10-18): its `target` is a default ScreenGui's area,
 below the top bar and inside a phone's safe area, and `GuiService:GetGuiInset()`
 returns the top bar. The camera's `ViewportSize` is still the whole screen, where
-Studio's leaves out the notches.
+Studio's leaves out the notches. `GuiService.TopbarInset` is the whole top bar
+between the device's side insets: RHR draws none of Roblox's top-bar buttons, where
+in Roblox the free area starts after them (about 208 px from the left in Studio's
+phone emulator).
 
 **Phone notches** (`--device phone`, `--device android`). Measured in Studio's iPhone
 16 emulator in Play on 2026-10-18; tests/test_notch_fill.py rebuilds each case. Two

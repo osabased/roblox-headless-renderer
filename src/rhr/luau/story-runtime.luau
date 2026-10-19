@@ -10,10 +10,12 @@
 -- loop that lets the UI settle. Story forms: function(target) (Hoarcekat, UI Labs);
 -- UI Labs tables with react/reactRoblox, roact, fusion, vide or a generic render;
 -- Flipbook's table.
--- The area ({"insets": [left, top, right, bottom], "topbar": height}) is where a
--- default ScreenGui sits on that screen, as a game's own UI does in Play. The
--- story's ScreenGui is that size, and GetGuiInset reads the top bar. It is
--- Sibling, as UI Labs mounts stories (Instance.new gives Global).
+-- The area ({"insets": [left, top, right, bottom], "topbar": height, "input": kind,
+-- "displaySize": size}) is where a default ScreenGui sits on that screen, as a
+-- game's own UI does in Play, and the device's input and display size. The story's
+-- ScreenGui is that size, and GetGuiInset reads the top bar. It is Sibling, as UI
+-- Labs mounts stories (Instance.new gives Global). Player settings read Roblox's
+-- defaults, as in a Studio play-test.
 -- Scripts' own threads are left behind: the process exits once the UI is saved.
 local roblox = require("@lune/roblox")
 local fs = require("@lune/fs")
@@ -27,6 +29,7 @@ local builtPath, modulePathJson, outPath = process.args[1], process.args[2], pro
 local viewport = roblox.Vector2.new(tonumber(process.args[4]) or 1615, tonumber(process.args[5]) or 1080)
 local storyName = process.args[6] or "Story"
 local area = serde.decode("json", process.args[7] or '{"insets": [0, 0, 0, 0], "topbar": 0}')
+local preferredInput = area.input or "KeyboardAndMouse"
 local areaSize = roblox.Vector2.new(
 	viewport.X - area.insets[1] - area.insets[3],
 	viewport.Y - area.insets[2] - area.insets[4]
@@ -151,19 +154,36 @@ end)
 roblox.implementMethod("RunService", "UnbindFromRenderStep", function(_, name)
 	renderSteps[name] = nil
 end)
-for name, value in { TouchEnabled = false, KeyboardEnabled = true, MouseEnabled = true, GamepadEnabled = false } do
-	pcall(roblox.implementProperty, "UserInputService", name, function()
-		return value
-	end)
-end
+local LAST_INPUT = { KeyboardAndMouse = "MouseButton1", Touch = "Touch", Gamepad = "Gamepad1" }
 roblox.implementMethod("UserInputService", "GetLastInputType", function()
-	return roblox.Enum.UserInputType.MouseButton1
+	return roblox.Enum.UserInputType[LAST_INPUT[preferredInput]]
 end)
 roblox.implementMethod("UserInputService", "GetMouseLocation", function()
 	return roblox.Vector2.new(0, 0)
 end)
 roblox.implementMethod("GuiService", "GetGuiInset", function()
 	return roblox.Vector2.new(0, area.topbar), roblox.Vector2.new(0, 0)
+end)
+local function shownWithin(object, root)
+	while object ~= root do
+		if object:IsA("GuiObject") and not object.Visible then
+			return false
+		end
+		object = object.Parent
+	end
+	return true
+end
+roblox.implementMethod("GuiService", "Select", function(service, parent)
+	local chosen
+	for _, object in parent:GetDescendants() do
+		if object:IsA("GuiObject") and object.Selectable and shownWithin(object, parent)
+			and (chosen == nil or object.SelectionOrder < chosen.SelectionOrder) then
+			chosen = object
+		end
+	end
+	if chosen then
+		service.SelectedObject = chosen
+	end
 end)
 roblox.implementMethod("Players", "GetPlayers", function(players)
 	return players:GetChildren()
@@ -198,6 +218,21 @@ end)
 -- Text measures: a rough width (RHR's own text engine lays the text out afterwards).
 roblox.implementMethod("TextService", "GetTextSize", function(_, text, size)
 	return roblox.Vector2.new(#tostring(text) * size * 0.5, size)
+end)
+roblox.implementMethod("TextService", "GetTextBoundsAsync", function(_, params)
+	local size, wrap = params.Size, params.Width
+	local widest, lines = 0, 0
+	for _, line in string.split(params.Text, "\n") do
+		local width = #line * size * 0.5
+		if wrap > 0 and width > wrap then
+			widest = wrap
+			lines += math.ceil(width / wrap)
+		else
+			widest = math.max(widest, width)
+			lines += 1
+		end
+	end
+	return roblox.Vector2.new(widest, lines * size)
 end)
 local guids = 0
 roblox.implementMethod("HttpService", "GenerateGUID", function(_, braces)
@@ -249,6 +284,20 @@ workspace.CurrentCamera = camera
 pcall(function()
 	camera.ViewportSize = viewport
 end)
+local userInput = game:GetService("UserInputService")
+userInput.PreferredInput = roblox.Enum.PreferredInput[preferredInput]
+userInput.TouchEnabled = preferredInput == "Touch"
+userInput.KeyboardEnabled = preferredInput == "KeyboardAndMouse"
+userInput.MouseEnabled = preferredInput == "KeyboardAndMouse"
+userInput.GamepadEnabled = preferredInput == "Gamepad"
+local guiService = game:GetService("GuiService")
+guiService.ViewportDisplaySize = roblox.Enum.DisplaySize[area.displaySize or "Medium"]
+guiService.PreferredTextSize = roblox.Enum.PreferredTextSize.Medium
+guiService.PreferredTransparency = 1
+guiService.ReducedMotionEnabled = false
+-- RHR draws none of Roblox's top-bar buttons, so the whole bar between the device's
+-- side insets is free.
+guiService.TopbarInset = roblox.Rect.new(area.insets[1], 0, viewport.X - area.insets[3], area.topbar)
 local players = game:GetService("Players")
 local localPlayer = players:FindFirstChildOfClass("Player") or roblox.Instance.new("Player")
 localPlayer.Name = if localPlayer.Name == "Player" or localPlayer.Name == "" then "Player" else localPlayer.Name
@@ -333,6 +382,9 @@ base = {
 		new = function(className, parent)
 			local instance = roblox.Instance.new(className)
 			presetSizes(instance)
+			if instance:IsA("GuiButton") or instance:IsA("TextBox") then
+				instance.InputSink = roblox.Enum.InputSink.Activate
+			end
 			if parent then
 				instance.Parent = parent
 			end
