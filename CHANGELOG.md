@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.0rc1+osabased.9 (fork)
+
+1.0.0rc1+osabased.8 with these fixes.
+
+### When upgrading
+
+- **Reading what Roblox works out in layout no longer raises in a story**, so code that
+  wrapped such a read in `pcall` now takes the value, and a story that read one
+  unguarded, which failed, now renders. The values are Roblox's before layout (zero
+  sizes, GuiState Idle), so code that sizes one element from another's TextBounds or
+  AbsoluteContentSize at mount draws it at zero; size it with AutomaticSize or a layout
+  instead, which RHR lays out as Roblox does.
+
+### Fixed
+
+- **A story reads Studio's values for a new element, where each read raised an
+  error**, for elements the story creates, the project's own and their clones:
+  - every GUI element: AbsoluteRotation 0 and GuiState Idle (AbsoluteSize and
+    AbsolutePosition already read 0, 0);
+  - TextLabel, TextButton and TextBox: TextBounds 0, 0 and OpenTypeFeaturesError "";
+    a TextBox's CursorPosition 1 and SelectionStart -1;
+  - VideoFrame: IsLoaded false, Resolution 0, 0 and TimeLength 0;
+  - ScrollingFrame: AbsoluteCanvasSize and AbsoluteWindowSize 0, 0;
+  - BillboardGui: CurrentDistance and DistanceStep 0;
+  - UIListLayout, UIGridLayout, UIPageLayout and UITableLayout: AbsoluteContentSize
+    0, 0, and a UIGridLayout's AbsoluteCellCount 0, 0.
+- **Three read differently from Studio, on purpose**, where each read raised too.
+  TextFits and an ImageLabel's or ImageButton's IsLoaded read true, where Studio reads
+  false until it has laid the text out or loaded the image, so code that shrinks text
+  until it fits, or waits for an image, goes on. A UIGridLayout's AbsoluteCellSize
+  reads 0, 0, where Studio reads the CellSize it starts with, which a story usually
+  changes.
+- **The story's target and its ScreenGui read AbsolutePosition 0, 0**, the area's
+  corner, as in Roblox, where the read raised.
+
 ## 1.0.0rc1+osabased.8 (fork)
 
 1.0.0rc1+osabased.7 with these fixes.
