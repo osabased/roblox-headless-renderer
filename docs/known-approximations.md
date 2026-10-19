@@ -110,6 +110,13 @@ and named on stderr (`--all-guis` draws them). A model file draws every ScreenGu
 (Studio's own plugin models are built that way) is drawn as a bottom layer with no
 top-bar inset.
 
+**ZIndexBehavior** is not followed in drawing: every ScreenGui is drawn as `Sibling`,
+each object's ZIndex placing it among its siblings only. `rhr hitmap` and `rhr check`'s
+`button-blocked` do follow it: under `Global` they order all of a ScreenGui's objects
+by ZIndex, ties in tree order. So in a `Global` ScreenGui whose ZIndex order is not its
+tree order, the render and the hit map can disagree about which object is on top. A
+story is mounted in a `Global` ScreenGui.
+
 ## Text
 
 **Measured:** Roblox makes `TextSize` the full line height (ascent + descent), not
