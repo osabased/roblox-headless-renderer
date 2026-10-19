@@ -639,6 +639,11 @@ def _intersect(a: Box, b: Box | None) -> Box:
     return Box(x0, y0, max(0.0, x1 - x0), max(0.0, y1 - y0), a.scale)
 
 
+def z_index_behavior(root: dict) -> str:
+    """The ZIndexBehavior a pane paints by: "Global", or "Sibling" when it has none."""
+    return _enum(root, "ZIndexBehavior", "Sibling")
+
+
 def paint_entries(root: dict, rect: tuple[float, float, float, float]) -> list[tuple[dict, Box]]:
     """Every GuiObject of a pane, bottom to top, with its rect clipped by its ancestors.
 
@@ -650,7 +655,7 @@ def paint_entries(root: dict, rect: tuple[float, float, float, float]) -> list[t
     """
     scrolls: dict[str, scrolling.Scroll] = {}
     boxes = lay_out_pane(root, rect, scrolls)
-    behavior = _enum(root, "ZIndexBehavior", "Sibling")
+    behavior = z_index_behavior(root)
     ordered: list[tuple[float, int, dict, Box]] = []
     counter = [0]
 

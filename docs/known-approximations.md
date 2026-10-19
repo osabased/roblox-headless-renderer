@@ -110,12 +110,32 @@ and named on stderr (`--all-guis` draws them). A model file draws every ScreenGu
 (Studio's own plugin models are built that way) is drawn as a bottom layer with no
 top-bar inset.
 
-**ZIndexBehavior** is not followed in drawing: every ScreenGui is drawn as `Sibling`,
-each object's ZIndex placing it among its siblings only. `rhr hitmap` and `rhr check`'s
-`button-blocked` do follow it: under `Global` they order all of a ScreenGui's objects
-by ZIndex, ties in tree order. So in a `Global` ScreenGui whose ZIndex order is not its
-tree order, the render and the hit map can disagree about which object is on top. A
-story is mounted in a `Global` ScreenGui.
+**ZIndexBehavior** is followed in drawing, and `rhr hitmap` and `rhr check`'s
+`button-blocked` stack objects by the same rules, so the picture and the hit map agree
+on which object is on top. Measured in Studio on 2026-10-19
+(tests/test_zindex_behavior.py holds the cases):
+
+- `Global` (the default for a new ScreenGui, BillboardGui or SurfaceGui, and the
+  ScreenGui a story is mounted in) stacks every object in the gui by ZIndex, ties in
+  tree order: a child with a lower ZIndex than its parent goes behind it, and cousins
+  interleave. A ClipsDescendants frame and a ScrollingFrame's window still clip their
+  descendants, and a ScrollingFrame's bars draw at the frame's own place in the order.
+- `Sibling` stacks children above their parent, and siblings by ZIndex.
+- Under both, ties stack in child order: a UIListLayout or UIGridLayout places its
+  items by LayoutOrder but does not stack them by it.
+- Under `Global` a CanvasGroup is not composited. Its GroupTransparency and
+  GroupColor3 fade and tint its own background only, and its descendants are drawn
+  untinted, at full opacity and unclipped by it (or its UICorner). Their hit regions
+  are still clipped to its rect, so what overflows a CanvasGroup is drawn but not hit,
+  in Studio as in RHR.
+
+Not followed: under `Sibling`, RHR fades a CanvasGroup's own UIStroke with the group
+and cuts an Outer one off at the group's edge, where Studio draws it whole and opaque.
+Not measured, and drawn by the rule RHR picked: a CanvasGroup's UIGradient under
+`Global` (applied to its own background) and its border under either behavior (faded
+with its background, and under `Sibling` also cut off at the group's edge); `Global`
+in a BillboardGui or SurfaceGui (the ScreenGui rules). UI outside any ScreenGui is
+drawn as `Sibling`.
 
 ## Text
 

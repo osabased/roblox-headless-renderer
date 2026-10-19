@@ -565,9 +565,9 @@ def _main_axis_offset(align: str, container_dim: float, total_dim: float) -> flo
     return 0.0
 
 
-def _render_list_children(canvas: skia.Canvas, children: list[dict], content_rect: Rect,
-                          layout: dict, ctx: dict, size_ref_rect: Rect | None = None) -> None:
-    """Render children in a UIListLayout arrangement."""
+def _place_list_children(children: list[dict], content_rect: Rect, layout: dict, ctx: dict,
+                         size_ref_rect: Rect | None = None) -> list[tuple[dict, Rect]]:
+    """Where a UIListLayout puts each visible child, in layout order."""
     direction = layout.get("direction", "Y")
     spacing_raw = layout.get("spacing", 0)
     wraps = layout.get("wraps", False)
@@ -575,11 +575,12 @@ def _render_list_children(canvas: skia.Canvas, children: list[dict], content_rec
     axis_dim = size_ref.h if direction == "Y" else size_ref.w
     spacing = _resolve_udim(spacing_raw, axis_dim)
     visible_children = [child for child in children if child.get("visible") is not False]
+    placements: list[tuple[dict, Rect]] = []
 
     # Wrapped horizontal lists form rows. Align each row by hAlign.
     if direction == "X" and wraps:
         if not visible_children:
-            return
+            return placements
 
         main_spacing = spacing
         # For wrapped horizontal lists, inter-row spacing follows the cross axis.
@@ -625,17 +626,16 @@ def _render_list_children(canvas: skia.Canvas, children: list[dict], content_rec
                     py += (height - child_rect.h) / 2
                 elif v_align == "Bottom":
                     py += height - child_rect.h
-                placed = Rect(x_cursor, py, child_rect.w, child_rect.h)
-                _render_node_at(canvas, child, placed, ctx, parent_rect=content_rect)
+                placements.append((child, Rect(x_cursor, py, child_rect.w, child_rect.h)))
                 x_cursor += child_rect.w + main_spacing
             y_cursor += height + row_spacing
-        return
+        return placements
 
     # Wrapped vertical lists form columns. Align columns as a group, then align
     # children within each column.
     if direction == "Y" and wraps:
         if not visible_children:
-            return
+            return placements
 
         main_spacing = spacing
         # For wrapped vertical lists, inter-column spacing follows the cross axis.
@@ -681,11 +681,10 @@ def _render_list_children(canvas: skia.Canvas, children: list[dict], content_rec
                     px += (width - child_rect.w) / 2
                 elif h_align == "Right":
                     px += width - child_rect.w
-                placed = Rect(px, y_cursor, child_rect.w, child_rect.h)
-                _render_node_at(canvas, child, placed, ctx, parent_rect=content_rect)
+                placements.append((child, Rect(px, y_cursor, child_rect.w, child_rect.h)))
                 y_cursor += child_rect.h + main_spacing
             x_cursor += width + column_spacing
-        return
+        return placements
 
     # Main-axis alignment (hAlign for X, vAlign for Y) offsets the starting cursor
     if direction == "X":
@@ -737,12 +736,13 @@ def _render_list_children(canvas: skia.Canvas, children: list[dict], content_rec
             cursor += child_rect.h + spacing
             line_max_cross = max(line_max_cross, child_rect.w)
 
-        _render_node_at(canvas, child, placed, ctx, parent_rect=content_rect)
+        placements.append((child, placed))
+    return placements
 
 
-def _render_grid_children(canvas: skia.Canvas, children: list[dict], content_rect: Rect,
-                          layout: dict, ctx: dict, size_ref_rect: Rect | None = None) -> None:
-    """Render children in a UIGridLayout arrangement."""
+def _place_grid_children(children: list[dict], content_rect: Rect, layout: dict,
+                         size_ref_rect: Rect | None = None) -> list[tuple[dict, Rect]]:
+    """Where a UIGridLayout puts each visible child, in layout order."""
     cell_size = layout.get("cellSize", [0.1, 0.1])
     cell_padding = layout.get("cellPadding", [0, 0])
     direction = layout.get("direction", "X")
@@ -754,7 +754,7 @@ def _render_grid_children(canvas: skia.Canvas, children: list[dict], content_rec
     pad_y = _grid_axis(cell_padding, size_ref.h, 1, 0.0)
 
     if cell_w <= 0 or cell_h <= 0:
-        return
+        return []
 
     cols = max(1, int((content_rect.w + pad_x) / (cell_w + pad_x)))
     rows = max(1, int((content_rect.h + pad_y) / (cell_h + pad_y)))
@@ -794,6 +794,7 @@ def _render_grid_children(canvas: skia.Canvas, children: list[dict], content_rec
 
     # Match Roblox layout behavior: hidden children do not consume grid slots.
     visible_children = [child for child in children if child.get("visible") is not False]
+    placements: list[tuple[dict, Rect]] = []
 
     for i, child in enumerate(visible_children):
         if direction == "Y":
@@ -805,8 +806,63 @@ def _render_grid_children(canvas: skia.Canvas, children: list[dict], content_rec
         cx = content_rect.x + x_offset + col * (cell_w + pad_x)
         cy = content_rect.y + y_offset + row * (cell_h + pad_y)
         cell = Rect(cx, cy, cell_w, cell_h)
-        placed = _fit_grid_child(child, cell)
-        _render_node_at(canvas, child, placed, ctx, parent_rect=content_rect)
+        placements.append((child, _fit_grid_child(child, cell)))
+    return placements
+
+
+def _layout_placements(node: dict, children: list[dict], content_rect: Rect,
+                       size_ref_rect: Rect, ctx: dict) -> dict[int, Rect] | None:
+    """Where the node's UIListLayout or UIGridLayout puts each child, keyed by id(child).
+
+    None when the node has no layout. Rects from RHR's layout pass
+    (ctx["_layout_rects"]) win over the engine's own. A child left out (hidden, or
+    in a grid of empty cells) is not drawn.
+    """
+    list_layout = node.get("list")
+    grid_layout = node.get("grid")
+    if not list_layout and not grid_layout:
+        return None
+    ordered = sorted(children, key=layout_order_key(node))
+    if list_layout:
+        placements = _place_list_children(ordered, content_rect, list_layout, ctx,
+                                          size_ref_rect=size_ref_rect)
+    else:
+        placements = _place_grid_children(ordered, content_rect, grid_layout,
+                                          size_ref_rect=size_ref_rect)
+    layout_rects = ctx.get("_layout_rects") or {}
+    return {id(child): layout_rects.get(child.get("_path"), rect) for child, rect in placements}
+
+
+def _render_children(canvas: skia.Canvas, node: dict, children: list[dict], content_rect: Rect,
+                     size_ref_rect: Rect, ctx: dict) -> None:
+    """Draw a node's children above it, by ZIndex with ties in child order (Sibling).
+
+    A UIListLayout or UIGridLayout places its items by LayoutOrder but does not
+    stack them by it: in Studio, items at equal ZIndex stack in child order.
+    """
+    placed = _layout_placements(node, children, content_rect, size_ref_rect, ctx)
+    for child in sorted(children, key=lambda c: c.get("zIndex", 1)):
+        if placed is None:
+            render_node(canvas, child, content_rect, ctx)
+        elif id(child) in placed:
+            _render_node_at(canvas, child, placed[id(child)], ctx, parent_rect=content_rect)
+
+
+def _group_paint(node: dict) -> skia.Paint | None:
+    """The paint a CanvasGroup's GroupTransparency and GroupColor3 apply through, or None."""
+    if node.get("type") != "CanvasGroup":
+        return None
+    group_transparency = max(0.0, min(1.0, _num(node.get("groupTransparency", 0), 0.0)))
+    group_color = node.get("groupColor", [255, 255, 255])
+    if group_transparency <= 0 and group_color == [255, 255, 255]:
+        return None
+    paint = skia.Paint()
+    paint.setAlpha(round(255 * (1.0 - group_transparency)))
+    # Tint the flattened layer on restore, not each overlapping child.
+    if group_color != [255, 255, 255]:
+        paint.setColorFilter(skia.ColorFilters.Blend(
+            skia.Color(*group_color, 255), skia.BlendMode.kModulate))
+    return paint
 
 
 def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
@@ -814,9 +870,6 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
     """Render a node at an explicit rect (used by layout systems that override positioning)."""
     if node.get("visible") is False:
         return
-    layout_rects = ctx.get("_layout_rects")
-    if layout_rects is not None and node.get("_path") in layout_rects:
-        rect = layout_rects[node["_path"]]
     if rect.w <= 0 or rect.h <= 0:
         return
 
@@ -834,19 +887,9 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
     name = node.get("_debug_path") or node.get("name") or node.get("type", "?")
 
     canvas.save()
-    group_layer = False
-    if node.get("type") == "CanvasGroup":
-        group_transparency = max(0.0, min(1.0, _num(node.get("groupTransparency", 0), 0.0)))
-        group_color = node.get("groupColor", [255, 255, 255])
-        if group_transparency > 0 or group_color != [255, 255, 255]:
-            group_paint = skia.Paint()
-            group_paint.setAlpha(round(255 * (1.0 - group_transparency)))
-            # Tint the flattened group on restore, not each overlapping child.
-            if group_color != [255, 255, 255]:
-                group_paint.setColorFilter(skia.ColorFilters.Blend(
-                    skia.Color(*group_color, 255), skia.BlendMode.kModulate))
-            canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
-            group_layer = True
+    group_paint = _group_paint(node)
+    if group_paint is not None:
+        canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
 
     rotation = node.get("rotation")
     if rotation:
@@ -934,9 +977,6 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
             visible_child_parent.w - pad_left - pad_right,
             visible_child_parent.h - pad_top - pad_bottom,
         )
-        list_layout = node.get("list")
-        grid_layout = node.get("grid")
-        children_ordered = sorted(children, key=layout_order_key(node))
         if node.get("type") == "ScrollingFrame":
             auto_canvas = node.get("autoCanvasSize")
             if auto_canvas:
@@ -945,16 +985,7 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
                 size_ref_for_layout = inner if node.get("padding") else child_parent
         else:
             size_ref_for_layout = inner if node.get("padding") else child_parent
-        if list_layout:
-            _render_list_children(canvas, children_ordered, inner, list_layout, ctx,
-                                  size_ref_rect=size_ref_for_layout)
-        elif grid_layout:
-            _render_grid_children(canvas, children_ordered, inner, grid_layout, ctx,
-                                  size_ref_rect=size_ref_for_layout)
-        else:
-            children_draw = sorted(children, key=lambda c: c.get("zIndex", 1))
-            for child in children_draw:
-                render_node(canvas, child, inner, ctx)
+        _render_children(canvas, node, children, inner, size_ref_for_layout, ctx)
 
     if scroll is not None:
         _pop_crop_clip(ctx)
@@ -966,7 +997,7 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
         _draw_canvas_group_gradient(canvas, box, gradient)
         canvas.restore()
 
-    if group_layer:
+    if group_paint is not None:
         canvas.restore()
 
     if ctx.get("debug"):
@@ -994,19 +1025,7 @@ def _render_children_only(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict
         max(0.0, rect.w - pad_left - pad_right),
         max(0.0, rect.h - pad_top - pad_bottom),
     )
-
-    children_ordered = sorted(children, key=layout_order_key(node))
-    list_layout = node.get("list")
-    grid_layout = node.get("grid")
-    if list_layout:
-        _render_list_children(canvas, children_ordered, content_rect, list_layout, ctx,
-                              size_ref_rect=content_rect)
-    elif grid_layout:
-        _render_grid_children(canvas, children_ordered, content_rect, grid_layout, ctx,
-                              size_ref_rect=content_rect)
-    else:
-        for child in sorted(children, key=lambda c: c.get("zIndex", 1)):
-            render_node(canvas, child, content_rect, ctx)
+    _render_children(canvas, node, children, content_rect, content_rect, ctx)
 
 
 def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -> None:
@@ -1044,19 +1063,9 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
 
     # 4. Save canvas state
     canvas.save()
-    group_layer = False
-    if node.get("type") == "CanvasGroup":
-        group_transparency = max(0.0, min(1.0, _num(node.get("groupTransparency", 0), 0.0)))
-        group_color = node.get("groupColor", [255, 255, 255])
-        if group_transparency > 0 or group_color != [255, 255, 255]:
-            group_paint = skia.Paint()
-            group_paint.setAlpha(round(255 * (1.0 - group_transparency)))
-            # Tint the flattened group on restore, not each overlapping child.
-            if group_color != [255, 255, 255]:
-                group_paint.setColorFilter(skia.ColorFilters.Blend(
-                    skia.Color(*group_color, 255), skia.BlendMode.kModulate))
-            canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
-            group_layer = True
+    group_paint = _group_paint(node)
+    if group_paint is not None:
+        canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
 
     # 5. Apply rotation around rect center
     rotation = node.get("rotation")
@@ -1152,11 +1161,6 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
             visible_child_parent.h - pad_top - pad_bottom,
         )
 
-        # Sort by layoutOrder (for list/grid), then zIndex for draw order
-        children_ordered = sorted(children, key=layout_order_key(node))
-
-        list_layout = node.get("list")
-        grid_layout = node.get("grid")
         if node.get("type") == "ScrollingFrame":
             auto_canvas = node.get("autoCanvasSize")
             if auto_canvas:
@@ -1165,18 +1169,7 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
                 size_ref_for_layout = content_rect if node.get("padding") else child_parent
         else:
             size_ref_for_layout = content_rect if node.get("padding") else child_parent
-
-        if list_layout:
-            _render_list_children(canvas, children_ordered, content_rect, list_layout, ctx,
-                                  size_ref_rect=size_ref_for_layout)
-        elif grid_layout:
-            _render_grid_children(canvas, children_ordered, content_rect, grid_layout, ctx,
-                                  size_ref_rect=size_ref_for_layout)
-        else:
-            # Default: each child positioned independently
-            children_draw = sorted(children, key=lambda c: c.get("zIndex", 1))
-            for child in children_draw:
-                render_node(canvas, child, content_rect, ctx)
+        _render_children(canvas, node, children, content_rect, size_ref_for_layout, ctx)
 
     if scroll is not None:
         _pop_crop_clip(ctx)
@@ -1188,7 +1181,7 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
         _draw_canvas_group_gradient(canvas, box, gradient)
         canvas.restore()
 
-    if group_layer:
+    if group_paint is not None:
         canvas.restore()
 
     # 14. Debug outline
@@ -1213,11 +1206,12 @@ class _DrawEntry:
     rect: Rect
     canvas_ops: list = field(default_factory=list)  # ordered rotation/clip ops from ancestors + self
     stretched: Rect | None = None  # where a FullscreenExtension object paints (_stretched_rect)
+    own_clip: tuple | None = None  # its own ClipsDescendants clip, which its strokes draw outside
 
 
 def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
                      entries: list, ctx: dict, override_rect: Rect | None = None) -> None:
-    """DFS walk collecting _DrawEntry items for Global z-index mode."""
+    """DFS walk in child order collecting _DrawEntry items for Global z-index mode."""
     if node.get("visible") is False:
         return
 
@@ -1225,16 +1219,18 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
 
     # Zero-area nodes paint nothing of their own, but their children still lay out
     # against the (zero) rect (see render_node), so keep walking the subtree and
-    # skip only this node's own draw entry.
+    # skip only this node's own draw entry, rect and crop bounds.
     degenerate = rect.w <= 0 or rect.h <= 0
 
-    if "_rect_map" in ctx and "_path" in node:
+    if not degenerate and "_rect_map" in ctx and "_path" in node:
         ctx["_rect_map"][node["_path"]] = rect
 
     stretched = None if degenerate else _stretched_rect(node, rect, ctx)
     box = stretched or rect
 
-    prev_crop_active = _begin_crop_tracking(ctx, node, box)
+    prev_crop_active = bool(ctx.get("_crop_track_active", False))
+    if not degenerate:
+        _begin_crop_tracking(ctx, node, box)
     pushed_crop_clip = False
     pushed_window = False
     try:
@@ -1252,7 +1248,16 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
         # Compute ScrollingFrame canvas rect (self-clip deferred so own strokes aren't clipped)
         canvas_rect, force_clip = _scrolling_frame_rects(node, rect, parent_rect)
 
-        # Node entry WITHOUT self-clip — own Outer strokes must not be clipped
+        # A zero-area node is clipped out of the children's own drawing, which is
+        # not what Roblox does with the holder pattern, so it clips nothing.
+        own_clip = None
+        if (force_clip or node.get("clipsDescendants")) and not degenerate:
+            corner_r = resolve_corner(node, box.w, box.h)
+            if corner_r > 0:
+                own_clip = ("clip_rrect", box.x, box.y, box.w, box.h, corner_r)
+            else:
+                own_clip = ("clip_rect", box.x, box.y, box.w, box.h)
+
         if not degenerate:
             entries.append(_DrawEntry(
                 z_index=node.get("zIndex", 1),
@@ -1261,20 +1266,16 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
                 rect=rect,
                 canvas_ops=list(ops),
                 stretched=stretched,
+                own_clip=own_clip,
             ))
 
-        # Add self-clip AFTER entry so only children inherit it. A zero-area node
-        # is clipped out of the children's own drawing, which is not what Roblox
-        # does with the holder pattern, so it pushes no clip.
-        should_clip_children = (force_clip or node.get("clipsDescendants")) and not degenerate
+        # Under Global a CanvasGroup doesn't clip its descendants' drawing, only
+        # their hits (measured in Studio).
+        should_clip_children = own_clip is not None and node.get("type") != "CanvasGroup"
         if ignore_scroll_clipping and node.get("type") == "ScrollingFrame":
             should_clip_children = False
         if should_clip_children:
-            corner_r = resolve_corner(node, box.w, box.h)
-            if corner_r > 0:
-                ops.append(("clip_rrect", box.x, box.y, box.w, box.h, corner_r))
-            else:
-                ops.append(("clip_rect", box.x, box.y, box.w, box.h))
+            ops.append(own_clip)
             _push_crop_clip(ctx, box)
             pushed_crop_clip = True
             scroll = _layout_scroll(node, ctx)
@@ -1306,9 +1307,6 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
             visible_child_parent.h - pad_top - pad_bottom,
         )
 
-        list_layout = node.get("list")
-        grid_layout = node.get("grid")
-        children_ordered = sorted(children, key=layout_order_key(node))
         if node.get("type") == "ScrollingFrame":
             auto_canvas = node.get("autoCanvasSize")
             if auto_canvas:
@@ -1318,15 +1316,12 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
         else:
             size_ref_for_layout = content_rect if node.get("padding") else child_parent
 
-        if list_layout:
-            _collect_list_children(children_ordered, content_rect, list_layout, ops, entries, ctx,
-                                   size_ref_rect=size_ref_for_layout)
-        elif grid_layout:
-            _collect_grid_children(children_ordered, content_rect, grid_layout, ops, entries, ctx,
-                                   size_ref_rect=size_ref_for_layout)
-        else:
-            for child in children:
+        placed = _layout_placements(node, children, content_rect, size_ref_for_layout, ctx)
+        for child in children:
+            if placed is None:
                 _collect_entries(child, content_rect, ops, entries, ctx)
+            elif id(child) in placed:
+                _collect_entries(child, content_rect, ops, entries, ctx, override_rect=placed[id(child)])
     finally:
         if pushed_window:
             _pop_crop_clip(ctx)
@@ -1335,252 +1330,24 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
         _end_crop_tracking(ctx, prev_crop_active)
 
 
-def _collect_list_children(children: list[dict], content_rect: Rect,
-                           layout: dict, parent_ops: list, entries: list, ctx: dict,
-                           size_ref_rect: Rect | None = None) -> None:
-    """Collect entries for UIListLayout children (mirrors _render_list_children)."""
-    direction = layout.get("direction", "Y")
-    spacing_raw = layout.get("spacing", 0)
-    wraps = layout.get("wraps", False)
-    size_ref = size_ref_rect if size_ref_rect is not None else content_rect
-    axis_dim = size_ref.h if direction == "Y" else size_ref.w
-    spacing = _resolve_udim(spacing_raw, axis_dim)
-    visible_children = [child for child in children if child.get("visible") is not False]
-
-    # Wrapped horizontal lists form rows. Align each row by hAlign.
-    if direction == "X" and wraps:
-        if not visible_children:
-            return
-
-        main_spacing = spacing
-        # For wrapped horizontal lists, inter-row spacing follows the cross axis.
-        row_spacing = _resolve_udim(spacing_raw, content_rect.h)
-
-        rows: list[tuple[list[tuple[dict, Rect]], float, float]] = []
-        row_items: list[tuple[dict, Rect]] = []
-        row_w = 0.0
-        row_h = 0.0
-
-        for child in visible_children:
-            child_rect = _resolve_node_rect(child, size_ref, ctx)
-            next_w = child_rect.w if not row_items else row_w + main_spacing + child_rect.w
-            if row_items and next_w > content_rect.w:
-                rows.append((row_items, row_w, row_h))
-                row_items = [(child, child_rect)]
-                row_w = child_rect.w
-                row_h = child_rect.h
-            else:
-                if row_items:
-                    row_w += main_spacing + child_rect.w
-                else:
-                    row_w = child_rect.w
-                row_h = max(row_h, child_rect.h)
-                row_items.append((child, child_rect))
-
-        if row_items:
-            rows.append((row_items, row_w, row_h))
-
-        total_h = sum(h for _, _, h in rows)
-        if len(rows) > 1:
-            total_h += row_spacing * (len(rows) - 1)
-
-        h_align = layout.get("hAlign", "Left")
-        v_align = layout.get("vAlign", "Top")
-        y_cursor = content_rect.y + _main_axis_offset(v_align, content_rect.h, total_h)
-
-        for items, width, height in rows:
-            x_cursor = content_rect.x + _main_axis_offset(h_align, content_rect.w, width)
-            for child, child_rect in items:
-                py = y_cursor
-                if v_align == "Center":
-                    py += (height - child_rect.h) / 2
-                elif v_align == "Bottom":
-                    py += height - child_rect.h
-                placed = Rect(x_cursor, py, child_rect.w, child_rect.h)
-                _collect_entries(child, content_rect, parent_ops, entries, ctx, override_rect=placed)
-                x_cursor += child_rect.w + main_spacing
-            y_cursor += height + row_spacing
-        return
-
-    # Wrapped vertical lists form columns. Align columns as a group, then align
-    # children within each column.
-    if direction == "Y" and wraps:
-        if not visible_children:
-            return
-
-        main_spacing = spacing
-        # For wrapped vertical lists, inter-column spacing follows the cross axis.
-        column_spacing = _resolve_udim(spacing_raw, content_rect.w)
-
-        columns: list[tuple[list[tuple[dict, Rect]], float, float]] = []
-        col_items: list[tuple[dict, Rect]] = []
-        col_h = 0.0
-        col_w = 0.0
-
-        for child in visible_children:
-            child_rect = _resolve_node_rect(child, size_ref, ctx)
-            next_h = child_rect.h if not col_items else col_h + main_spacing + child_rect.h
-            if col_items and next_h > content_rect.h:
-                columns.append((col_items, col_w, col_h))
-                col_items = [(child, child_rect)]
-                col_h = child_rect.h
-                col_w = child_rect.w
-            else:
-                if col_items:
-                    col_h += main_spacing + child_rect.h
-                else:
-                    col_h = child_rect.h
-                col_w = max(col_w, child_rect.w)
-                col_items.append((child, child_rect))
-
-        if col_items:
-            columns.append((col_items, col_w, col_h))
-
-        total_w = sum(w for _, w, _ in columns)
-        if len(columns) > 1:
-            total_w += column_spacing * (len(columns) - 1)
-
-        h_align = layout.get("hAlign", "Left")
-        v_align = layout.get("vAlign", "Top")
-        x_cursor = content_rect.x + _main_axis_offset(h_align, content_rect.w, total_w)
-
-        for items, width, height in columns:
-            y_cursor = content_rect.y + _main_axis_offset(v_align, content_rect.h, height)
-            for child, child_rect in items:
-                px = x_cursor
-                if h_align == "Center":
-                    px += (width - child_rect.w) / 2
-                elif h_align == "Right":
-                    px += width - child_rect.w
-                placed = Rect(px, y_cursor, child_rect.w, child_rect.h)
-                _collect_entries(child, content_rect, parent_ops, entries, ctx, override_rect=placed)
-                y_cursor += child_rect.h + main_spacing
-            x_cursor += width + column_spacing
-        return
-
-    # Main-axis alignment offset
-    if direction == "X":
-        main_align = layout.get("hAlign", "Left")
-    else:
-        main_align = layout.get("vAlign", "Top")
-    if not wraps and main_align not in ("Left", "Top"):
-        total = _measure_list_main_axis(visible_children, size_ref, direction, spacing, ctx)
-        cursor = _main_axis_offset(main_align, axis_dim, total)
-    else:
-        cursor = 0.0
-
-    cross_cursor = 0.0
-    line_max_cross = 0.0
-
-    for child in visible_children:
-
-        child_rect = _resolve_node_rect(child, size_ref, ctx)
-
-        if direction == "X":
-            if wraps and cursor > 0 and cursor + child_rect.w > content_rect.w:
-                cross_cursor += line_max_cross + spacing
-                cursor = 0.0
-                line_max_cross = 0.0
-            placed = Rect(content_rect.x + cursor, content_rect.y + cross_cursor,
-                          child_rect.w, child_rect.h)
-            v_align = layout.get("vAlign", "Top")
-            if v_align == "Center":
-                placed.y = content_rect.y + cross_cursor + (content_rect.h - child_rect.h) / 2
-            elif v_align == "Bottom":
-                placed.y = content_rect.y + cross_cursor + content_rect.h - child_rect.h
-            cursor += child_rect.w + spacing
-            line_max_cross = max(line_max_cross, child_rect.h)
-        else:
-            if wraps and cursor > 0 and cursor + child_rect.h > content_rect.h:
-                cross_cursor += line_max_cross + spacing
-                cursor = 0.0
-                line_max_cross = 0.0
-            placed = Rect(content_rect.x + cross_cursor, content_rect.y + cursor,
-                          child_rect.w, child_rect.h)
-            h_align = layout.get("hAlign", "Left")
-            if h_align == "Center":
-                placed.x = content_rect.x + cross_cursor + (content_rect.w - child_rect.w) / 2
-            elif h_align == "Right":
-                placed.x = content_rect.x + cross_cursor + content_rect.w - child_rect.w
-            cursor += child_rect.h + spacing
-            line_max_cross = max(line_max_cross, child_rect.w)
-
-        _collect_entries(child, content_rect, parent_ops, entries, ctx, override_rect=placed)
-
-
-def _collect_grid_children(children: list[dict], content_rect: Rect,
-                           layout: dict, parent_ops: list, entries: list, ctx: dict,
-                           size_ref_rect: Rect | None = None) -> None:
-    """Collect entries for UIGridLayout children (mirrors _render_grid_children)."""
-    cell_size = layout.get("cellSize", [0.1, 0.1])
-    cell_padding = layout.get("cellPadding", [0, 0])
-    direction = layout.get("direction", "X")
-
-    size_ref = size_ref_rect if size_ref_rect is not None else content_rect
-    cell_w = _grid_axis(cell_size, size_ref.w, 0, 0.1)
-    cell_h = _grid_axis(cell_size, size_ref.h, 1, 0.1)
-    pad_x = _grid_axis(cell_padding, size_ref.w, 0, 0.0)
-    pad_y = _grid_axis(cell_padding, size_ref.h, 1, 0.0)
-
-    if cell_w <= 0 or cell_h <= 0:
-        return
-
-    cols = max(1, int((content_rect.w + pad_x) / (cell_w + pad_x)))
-    rows = max(1, int((content_rect.h + pad_y) / (cell_h + pad_y)))
-    h_align = layout.get("hAlign", "Left")
-    v_align = layout.get("vAlign", "Top")
-    grid_w = cols * cell_w + max(0, cols - 1) * pad_x
-    grid_h = rows * cell_h + max(0, rows - 1) * pad_y
-    x_offset = _main_axis_offset(h_align, content_rect.w, grid_w)
-    y_offset = _main_axis_offset(v_align, content_rect.h, grid_h)
-
-    def _fit_grid_child(child: dict, cell: Rect) -> Rect:
-        w = cell.w
-        h = cell.h
-
-        aspect = child.get("aspectRatio")
-        if aspect is not None and aspect > 0 and h > 0:
-            current = w / h
-            if current > aspect:
-                w = h * aspect
-            else:
-                h = w / aspect
-
-        scale = child.get("scale")
-        if scale is not None:
-            s = _num(scale, 1.0)
-            w *= s
-            h *= s
-
-        return Rect(
-            x=cell.x + (cell.w - w) / 2,
-            y=cell.y + (cell.h - h) / 2,
-            w=w,
-            h=h,
-        )
-
-    # Match Roblox layout behavior: hidden children do not consume grid slots.
-    visible_children = [child for child in children if child.get("visible") is not False]
-
-    for i, child in enumerate(visible_children):
-        if direction == "Y":
-            row = i % rows
-            col = i // rows
-        else:
-            col = i % cols
-            row = i // cols
-        cx = content_rect.x + x_offset + col * (cell_w + pad_x)
-        cy = content_rect.y + y_offset + row * (cell_h + pad_y)
-        cell = Rect(cx, cy, cell_w, cell_h)
-        placed = _fit_grid_child(child, cell)
-        _collect_entries(child, content_rect, parent_ops, entries, ctx, override_rect=placed)
+def _apply_canvas_op(canvas: skia.Canvas, op: tuple) -> None:
+    """Apply one _DrawEntry canvas op: a rotation or a clip."""
+    if op[0] == "rotate":
+        canvas.rotate(op[1], op[2], op[3])
+    elif op[0] == "clip_rrect":
+        sk_rect = skia.Rect.MakeXYWH(op[1], op[2], op[3], op[4])
+        canvas.clipRRect(skia.RRect.MakeRectXY(sk_rect, op[5], op[5]))
+    elif op[0] == "clip_rect":
+        canvas.clipRect(skia.Rect.MakeXYWH(op[1], op[2], op[3], op[4]))
 
 
 def _draw_single_node(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
-                      stretched: Rect | None = None) -> None:
+                      stretched: Rect | None = None, own_clip: tuple | None = None) -> None:
     """Draw a single node's visuals (background, stroke, text, image) without recursion.
 
     A FullscreenExtension object's background, strokes and image draw at *stretched*.
+    Its scroll bars, text and image draw inside *own_clip*, its own
+    ClipsDescendants clip (a canvas op).
     """
     name = node.get("_debug_path") or node.get("name") or node.get("type", "?")
     gradient = node.get("gradient")
@@ -1589,13 +1356,23 @@ def _draw_single_node(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
     is_image = node_type in ("ImageLabel", "ImageButton")
     box = stretched or rect
     _annotate(canvas, f"BG: {name}")
+    # Under Global a CanvasGroup isn't composited: its GroupTransparency and
+    # GroupColor3 reach its own background only (measured in Studio).
+    group_paint = _group_paint(node)
+    if group_paint is not None:
+        canvas.saveLayer(None, group_paint)
     draw_background(canvas, box.x, box.y, box.w, box.h, node, gradient=gradient)
+    if group_paint is not None:
+        canvas.restore()
 
     # Border strokes — after background, before content
     for s in _sort_strokes(node.get("strokes", [])):
         if not is_text or s.get("applyMode") == "Border":
             _annotate(canvas, f"Stroke: {name} — thick={s.get('thickness', 1)}, pos={s.get('borderPosition', 'Outer')}")
             draw_stroke(canvas, box.x, box.y, box.w, box.h, node, s)
+
+    if own_clip is not None:
+        _apply_canvas_op(canvas, own_clip)
 
     scroll = _layout_scroll(node, ctx)
     if scroll is not None:
@@ -1635,14 +1412,9 @@ def _render_global(canvas: skia.Canvas, obj: dict, root_rect: Rect, ctx: dict) -
         if safe_clip is not None and entry.stretched is None:
             canvas.clipRect(safe_clip)
         for op in entry.canvas_ops:
-            if op[0] == "rotate":
-                canvas.rotate(op[1], op[2], op[3])
-            elif op[0] == "clip_rrect":
-                sk_rect = skia.Rect.MakeXYWH(op[1], op[2], op[3], op[4])
-                canvas.clipRRect(skia.RRect.MakeRectXY(sk_rect, op[5], op[5]))
-            elif op[0] == "clip_rect":
-                canvas.clipRect(skia.Rect.MakeXYWH(op[1], op[2], op[3], op[4]))
-        _draw_single_node(canvas, entry.node, entry.rect, ctx, stretched=entry.stretched)
+            _apply_canvas_op(canvas, op)
+        _draw_single_node(canvas, entry.node, entry.rect, ctx, stretched=entry.stretched,
+                          own_clip=entry.own_clip)
         canvas.restore()
 
 

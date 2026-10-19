@@ -457,15 +457,17 @@ def _attach_layout(obj: dict, ir_node: dict | None, rect) -> None:
 
     The engine draws at these rects (obj["_layoutRects"], read by render_object), with
     each ScrollingFrame's window and bars (obj["_layoutScroll"]); its own layout code
-    only runs for objects this pass has no rect for. Under UIScale the drawn text size
-    and outline thickness scale with the object, as in Roblox.
+    only runs for objects this pass has no rect for. It stacks them by the pane's
+    ZIndexBehavior (obj["zIndexBehavior"]), as the hitmap does. Under UIScale the
+    drawn text size and outline thickness scale with the object, as in Roblox.
     """
     from rhr.ui_engine.layout import Rect
 
-    from rhr.ui_layout import lay_out_pane
+    from rhr.ui_layout import lay_out_pane, z_index_behavior
 
     if ir_node is None:
         return
+    obj["zIndexBehavior"] = z_index_behavior(ir_node)
     scrolls: dict = {}
     boxes = lay_out_pane(ir_node, rect, scrolls)
     obj["_layoutRects"] = {path: Rect(b.x, b.y, b.w, b.h) for path, b in boxes.items()}
