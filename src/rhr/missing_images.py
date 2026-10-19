@@ -112,7 +112,7 @@ def _judge(uri: str, key: str, statuses: dict[str, str], refused: dict[str, str]
         return _swapped(override), None
     status = statuses.get(aid, "")
     if status.startswith("missing"):
-        why = status.removeprefix("missing").strip(" ()") or "unavailable"
+        why = fetch.missing_reason(status)
         return why, download_hint(why)
     file = assets._asset_cache_dir(icons_dir) / f"{aid}.png"
     if file.exists():

@@ -147,6 +147,14 @@ def image_uses(nodes) -> dict[str, list[dict]]:
     return uses
 
 
+def missing_reason(status: str) -> str:
+    """Why a 'missing (why)' status is missing: 'unavailable' when it does not say."""
+    reason = status.removeprefix("missing").strip()
+    if reason.startswith("(") and reason.endswith(")"):
+        reason = reason[1:-1]
+    return reason or "unavailable"
+
+
 def refused_recently(kind: str, ids) -> dict[str, str]:
     """id -> why, for the assets Roblox refused the last time RHR asked (in the last
     day) and that are not cached: known to be unavailable, without asking again."""
@@ -156,7 +164,7 @@ def refused_recently(kind: str, ids) -> dict[str, str]:
     for asset in ids:
         record = failures.get(f"{kind}:{asset}")
         if record and now - record.get("time", 0) < RETRY_AFTER and not _cached(kind, asset):
-            out[asset] = str(record.get("status", "missing")).removeprefix("missing").strip(" ()") or "unavailable"
+            out[asset] = missing_reason(str(record.get("status", "missing")))
     return out
 
 

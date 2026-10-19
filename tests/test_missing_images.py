@@ -328,14 +328,12 @@ def check_gaps(check, cache: Path) -> None:
 
 def check_grades(check) -> None:
     try:
+        from rhr.fetch import missing_reason as why
         from rhr.missing_images import refused_by_roblox
     except ImportError as exc:
         check(False, f"check: Roblox's final refusals are warnings, a fetch that failed on rhr's side info ({exc})")
         return
     from rhr import fetch
-
-    def why(status: str) -> str:
-        return status.removeprefix("missing").strip(" ()")
 
     final = (fetch.UNAVAILABLE, why(fetch._refused(404, "Asset not found", signed_in=True)),
              why(fetch._refused(409, "Conflict", signed_in="API key")), "not an image: UnidentifiedImageError")
@@ -345,6 +343,8 @@ def check_grades(check) -> None:
     check(all(map(refused_by_roblox, final)) and not any(map(refused_by_roblox, ours)),
           f"check: Roblox's final refusals are warnings, a fetch that failed on rhr's side info "
           f"({[r for r in final if not refused_by_roblox(r)]}, {[r for r in ours if refused_by_roblox(r)]})")
+    nested = why("missing (signed in: timed out (os error 10060))")
+    check(nested == "signed in: timed out (os error 10060)", f"check: a reason keeps its own parentheses ({nested!r})")
 
 
 def check_in_world(check, tmp: Path) -> None:
