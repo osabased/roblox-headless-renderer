@@ -140,24 +140,39 @@ with its background, and under `Sibling` also cut off at the group's edge); `Glo
 in a BillboardGui or SurfaceGui (the ScreenGui rules). UI outside any ScreenGui is
 drawn as `Sibling`.
 
-**UIGradient.** Measured in Studio on 2026-10-18; tests/test_gradient_rotation.py
-holds the Rotation and text cases, each within half a degree and 1 px of Studio.
+**UIGradient.** Measured in Studio on 2026-10-18 and 2026-10-19;
+tests/test_gradient_rotation.py and tests/test_gradient_studio.py hold the cases, each
+within half a degree and 1 px of Studio but the text strokes below.
 
-- The ramp is centred on the object and runs at `Rotation`, in screen pixels. Along
-  an axis it spans the object's width or height. Off the axes it spans the object's
-  inscribed ellipse, sqrt((w cos R)^2 + (h sin R)^2) at a Rotation R, so the corners
-  take the end colours: at 45 degrees a 172 x 100 Frame ramps over 140.5 px, where a
-  ramp that just reaches the corners would be 192.
+- The ramp runs at `Rotation`, in screen pixels, centred on the object moved by
+  `Offset` (`Offset.X` times the width, `Offset.Y` times the height). It spans the
+  chord through that box's centre along `Rotation`, min(w / |cos R|, h / |sin R|), so
+  its ends meet the box's edges and off the axes the corners take the end colours: at
+  30 degrees a 172 x 100 Frame ramps over 198.6 px, a 300 x 60 one over 120. Measured
+  on 172 x 100, 100 x 172, 120 x 120 and 300 x 60 at Rotation 30, 60, 135 and 315, and
+  with `Offset` at Rotation 0, 30, 45 and 90.
 - On a TextLabel the ramp spans the label, not its text, at the gradient's own
-  `Rotation`.
-- `Offset` at Rotation 0 moves the ramp along by that share of the width.
+  `Rotation`; at 45 degrees a 300 x 120 label ramps over its 169.7 px chord.
+- A UIStroke's gradient spans the stroke's outer edge: the object grown by
+  `Thickness` for `Outer`, half of it for `Center`, nothing for `Inner`, so a 4 px
+  Outer stroke on a 140 x 80 Frame ramps over 148 px at Rotation 0 and 88 at 90. A
+  UICorner doesn't change it. Measured at 1 to 12 px on 140 x 80 and 220 x 80.
+- A text stroke's gradient (a `Contextual` UIStroke on a TextLabel, with the
+  UIGradient under the stroke) spans the label, not the label grown by the stroke,
+  which would run 12 px longer with a 6 px stroke. Studio's read 1.6 to 2.4 px shorter
+  than the label on a 300 x 120 label, which no rule here explains; RHR draws the
+  label's length.
 
-Not followed: a UIStroke's gradient spans the object in RHR, where Studio's runs
-longer. With a 4 px Outer stroke on a 140 px wide Frame, Studio ramps over 152 px,
-centred, so RHR reaches the end colours 6 px sooner at each end; one case cannot tell
-which rule Studio follows. Not measured, and drawn by the rules above: other sizes and
-angles off the axes, `Offset` with a `Rotation`, text off the axes, a UIStroke's
-gradient at other thicknesses, positions or rotations, and a text stroke's gradient.
+Not followed: with a short word in a wide label ("Hi" at TextSize 48 in 300 x 120),
+Studio's text ramp at Rotation 45 reads 175 px at 47.7 degrees, and its text stroke's
+at Rotation 0 reads 328 px, where RHR's run 169.7 px at 45 degrees and 300 px; RHR
+follows the label as above. The glyphs cover a sliver of the ramp there, so these
+readings carry the most noise; the same word's text stroke at Rotation 90 matches in
+length (119.1 px) but reads 92.1 degrees. A 1 px Outer stroke on a 220 x 80 Frame
+reads 223.2 px, where RHR's runs 222; the same stroke on a 140 x 80 Frame matches.
+Not measured, and drawn by the rules above: a UIStroke's gradient with
+`BorderOffset`, `Offset` or `Thickness` set by scale; whether a TextLabel's own
+UIGradient tints its text stroke; gradients on images and rich text.
 
 ## Text
 

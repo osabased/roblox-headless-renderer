@@ -141,9 +141,13 @@ def make_gradient_shader(
     rad = math.radians(rotation_deg)
     cos_r = math.cos(rad)
     sin_r = math.sin(rad)
-    # Roblox spans the ramp across the box's inscribed ellipse, not its bounding
-    # line, so off-axis the corners take the end colours.
-    half_len = math.hypot(w * cos_r, h * sin_r) / 2.0
+    # Measured in Studio: the ramp spans the chord through the box's centre along
+    # Rotation, so its ends meet the box's edges and off-axis the corners clamp.
+    chord = min(
+        w / abs(cos_r) if abs(cos_r) > 1e-9 else math.inf,
+        h / abs(sin_r) if abs(sin_r) > 1e-9 else math.inf,
+    )
+    half_len = chord / 2.0
     dx = cos_r * half_len
     dy = sin_r * half_len
     start = skia.Point(cx - dx, cy - dy)
@@ -246,19 +250,6 @@ def draw_stroke(
     join_key = str(stroke.get("lineJoin", "Round")).strip().lower()
     paint.setStrokeJoin(_JOIN_MAP.get(join_key, skia.Paint.Join.kRound_Join))
 
-    stroke_grad = stroke.get("gradient")
-    if stroke_grad:
-        shader = make_gradient_shader(
-            stroke_grad, x, y, w, h,
-            base_color=(r, g, b), base_transparency=transparency,
-        )
-        if shader:
-            paint.setShader(shader)
-        else:
-            paint.setColor(skia.Color(r, g, b, _alpha_from_transparency(transparency)))
-    else:
-        paint.setColor(skia.Color(r, g, b, _alpha_from_transparency(transparency)))
-
     # BorderStrokePosition: skia strokes are centered on the path, so
     # shift the rect inward/outward by half the thickness.
     # Then apply BorderOffset (UDim relative to min(w, h)).
@@ -283,6 +274,19 @@ def draw_stroke(
 
     if sw <= 0 or sh <= 0:
         return
+
+    stroke_grad = stroke.get("gradient")
+    shader = None
+    if stroke_grad:
+        # Studio spans a stroke's gradient across the stroke's outer edge, not the object's box.
+        shader = make_gradient_shader(
+            stroke_grad, sx - thickness / 2, sy - thickness / 2, sw + thickness, sh + thickness,
+            base_color=(r, g, b), base_transparency=transparency,
+        )
+    if shader:
+        paint.setShader(shader)
+    else:
+        paint.setColor(skia.Color(r, g, b, _alpha_from_transparency(transparency)))
 
     radius = resolve_corner(node, w, h)
     rect = skia.Rect.MakeXYWH(sx, sy, sw, sh)

@@ -1,11 +1,12 @@
-"""UIGradient ramps run along Studio's lines: off the axes across the box's inscribed
-ellipse, and on text at the gradient's own Rotation.
+"""UIGradient ramps run along Studio's lines: off the axes across the chord through the
+box's centre, and on text at the gradient's own Rotation.
 
 Fitted from Studio's fidelity capture of 2026-10-18 (1536x790, Edit mode). A 172x100
-Frame at Rotation 45 ramps at 45.1 degrees over 140.5 px, centred, with its corners
-clamped to the end colours; at Rotation 0 and 90 it ramps over the width and the
-height. A 172x100 TextLabel's glyphs at Rotation 0 ramp at 0.5 degrees over the
-label's 172 px width.
+Frame at Rotation 45 ramps at 45.1 degrees over 140.5 px (the chord is 141.4),
+centred, with its corners clamped to the end colours; at Rotation 0 and 90 it ramps
+over the width and the height. A 172x100 TextLabel's glyphs at Rotation 0 ramp at 0.5
+degrees over the label's 172 px width. test_gradient_studio.py has the other sizes,
+angles, Offsets and strokes.
 """
 import math
 import sys
