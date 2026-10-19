@@ -6,10 +6,13 @@
 
 ### When upgrading
 
-- **A `Global` gui is drawn as `Global`.** That is the default for a new ScreenGui,
-  BillboardGui or SurfaceGui, and the ScreenGui a story is mounted in. Its picture
-  changes wherever its ZIndex order is not its tree order, and a CanvasGroup in it no
-  longer fades, tints or clips its children.
+- **A `Global` gui is drawn as `Global`.** That is the default for a ScreenGui,
+  BillboardGui or SurfaceGui made by `Instance.new`. Its picture changes wherever its
+  ZIndex order is not its tree order, and a CanvasGroup in it no longer fades, tints
+  or clips its children.
+- **A story mounts in a `Sibling` ScreenGui**, as UI Labs mounts stories; it was
+  `Global`, the class default. Its picture was drawn as `Sibling` already, and now
+  `rhr hitmap` and `rhr check`'s `button-blocked` stack it as `Sibling` too.
 
 ### Fixed
 

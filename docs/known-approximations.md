@@ -115,12 +115,13 @@ top-bar inset.
 on which object is on top. Measured in Studio on 2026-10-19
 (tests/test_zindex_behavior.py holds the cases):
 
-- `Global` (the default for a new ScreenGui, BillboardGui or SurfaceGui, and the
-  ScreenGui a story is mounted in) stacks every object in the gui by ZIndex, ties in
-  tree order: a child with a lower ZIndex than its parent goes behind it, and cousins
-  interleave. A ClipsDescendants frame and a ScrollingFrame's window still clip their
-  descendants, and a ScrollingFrame's bars draw at the frame's own place in the order.
-- `Sibling` stacks children above their parent, and siblings by ZIndex.
+- `Global` (the default for a ScreenGui, BillboardGui or SurfaceGui made by
+  `Instance.new`) stacks every object in the gui by ZIndex, ties in tree order: a
+  child with a lower ZIndex than its parent goes behind it, and cousins interleave. A
+  ClipsDescendants frame and a ScrollingFrame's window still clip their descendants,
+  and a ScrollingFrame's bars draw at the frame's own place in the order.
+- `Sibling` (the ScreenGui a story is mounted in, as UI Labs mounts stories) stacks
+  children above their parent, and siblings by ZIndex.
 - Under both, ties stack in child order: a UIListLayout or UIGridLayout places its
   items by LayoutOrder but does not stack them by it.
 - Under `Global` a CanvasGroup is not composited. Its GroupTransparency and

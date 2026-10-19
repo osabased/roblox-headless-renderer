@@ -12,7 +12,8 @@
 -- Flipbook's table.
 -- The area ({"insets": [left, top, right, bottom], "topbar": height}) is where a
 -- default ScreenGui sits on that screen, as a game's own UI does in Play. The
--- story's ScreenGui is that size, and GetGuiInset reads the top bar.
+-- story's ScreenGui is that size, and GetGuiInset reads the top bar. It is
+-- Sibling, as UI Labs mounts stories (Instance.new gives Global).
 -- Scripts' own threads are left behind: the process exits once the UI is saved.
 local roblox = require("@lune/roblox")
 local fs = require("@lune/fs")
@@ -403,6 +404,7 @@ end
 
 local screen = roblox.Instance.new("ScreenGui")
 screen.Name = storyName
+screen.ZIndexBehavior = roblox.Enum.ZIndexBehavior.Sibling
 screen.ResetOnSpawn = false
 screen.Parent = playerGui
 local target = roblox.Instance.new("Frame")

@@ -7,8 +7,9 @@ pesde links them (Packages/Tag.luau), and one story per form: a function(target)
 that reads sizes and tweens (Badge), a UI Labs table with controls (Panel), one that
 sizes itself from the screen (Viewport), one that uses the package (Tagged), one
 that calls Roblox's profiler every frame (Profiled), one that sets a legacy Font and
-a FontFace (Fonts), one that fails (Broken), one whose require leads nowhere
-(Missing) and one that reaches for Lune's own globals (Escape).
+a FontFace (Fonts), one with a child under its parent's ZIndex (Stacked), one that
+fails (Broken), one whose require leads nowhere (Missing) and one that reaches for
+Lune's own globals (Escape).
 `tests/fixtures/rojo_wrapped/` is a place whose default.project.json only wraps
 common.project.json.
 
@@ -126,6 +127,23 @@ def main() -> int:
     check((legacy.get("family"), legacy.get("weight")) == ("rbxasset://fonts/families/GothamSSm.json",
                                                            "Enum.FontWeight.Bold"),
           f"a legacy Font alone is drawn as its FontFace: {legacy}")
+
+    print("story: it mounts in a Sibling ScreenGui, as UI Labs mounts stories")
+    from PIL import Image
+
+    stacked = STORIES / "Stacked.story.luau"
+    screen = resolve_path(load_ir(ir_for(stacked, viewport=(800, 600)))["roots"], "Stacked")
+    behavior = screen["props"].get("ZIndexBehavior", {}).get("name")
+    check(behavior == "Sibling", f"the story's ScreenGui: {behavior!r}")
+    with tempfile.TemporaryDirectory(prefix="rhr-story-") as directory:
+        out = Path(directory) / "stacked.png"
+        proc = run(["ui", str(stacked), "--viewport", "800x600", "--out", str(out)])
+        pixel = None
+        if proc.returncode == 0:
+            with Image.open(out) as image:
+                pixel = image.convert("RGB").getpixel((200, 208))
+    check(pixel == (255, 0, 0), f"a child under its parent's ZIndex is drawn above it: {pixel} "
+                                f"{proc.stderr[-300:] if proc.returncode else ''}")
 
     print("story: check, and a picture")
     proc = run(["check", str(STORIES / "Panel.story.luau")])
