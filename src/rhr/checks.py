@@ -11,7 +11,8 @@ Severities, least honest one wins:
   error    a real mistake nothing intends: fails the build (`rhr check` exits 1).
   warning  very likely a mistake a player would see; worth a look.
   info     a pattern that is often intended (layout holders, text a script fades in,
-           equal ZIndex siblings); not printed unless `--min-severity info`.
+           equal ZIndex siblings), or an image only RHR's render leaves out; not
+           printed unless `--min-severity info`.
 
 The checks, by id (the ids are part of the interface):
 
@@ -37,8 +38,15 @@ The checks, by id (the ids are part of the interface):
                                   it cannot be clicked there (rules measured in Studio,
                                   rhr.hitmap)
   button-covered         info     a button under another button at its centre
-  image-missing          warning  an image Roblox refused the last time RHR asked for
-                                  it (`rhr check` never downloads; `rhr ui` does)
+  image-missing          warning  an image Roblox refuses for good (deleted, private,
+                                  moderated, no such asset, not an image; a hover or
+                                  pressed image's too): it is blank in Roblox as well
+                                  (info for one only RHR's render leaves out: a file
+                                  built into the client, a thumbnail Roblox makes at
+                                  run time, one RHR could not download). Each says
+                                  why and, where RHR can, how to get it drawn. An id
+                                  not downloaded yet is not reported (`rhr check`
+                                  never downloads; `rhr ui` does)
   zero-size-grid-cell    error    a UIGridLayout cell that resolves to nothing
   child-outside-clip     info     content entirely outside a clipping parent
   invisible-content      info     a visible element that paints nothing
@@ -355,16 +363,36 @@ def check_device_obstructions(nodes: list[dict], ctx: dict) -> list[dict]:
 
 
 def check_image_missing(nodes: list[dict], ctx: dict) -> list[dict]:
-    missing = ctx.get("missing_images") or {}
+    """Each image the render left out, then each image Roblox refused on a visible
+    element that the render doesn't draw (a hover or pressed image, or one off the
+    screen), each once; not an id that isn't downloaded yet, which `rhr ui` would
+    download."""
+    from rhr.missing_images import NOT_DOWNLOADED, download_hint
+
     findings = []
+    reported = set()
+    for row in ctx.get("undrawn_images") or []:
+        if row["reason"] != NOT_DOWNLOADED and (row["path"], row["uri"]) not in reported:
+            reported.add((row["path"], row["uri"]))
+            findings.append(_image_finding(row, row["reason"], row.get("hint")))
+    missing = ctx.get("missing_images") or {}
     for entry in nodes:
         known = missing.get(entry["path"])
-        if known is None or not entry.get("visible"):
+        if known is None or not entry.get("visible") or (entry["path"], known[0]) in reported:
             continue
         uri, why = known
-        findings.append(_finding("image-missing", "warning", entry,
-                                 f"{uri} could not be downloaded ({why}): it draws as nothing"))
+        findings.append(_image_finding({"path": entry["path"], "uri": uri}, why, download_hint(why)))
     return findings
+
+
+def _image_finding(row: dict, reason: str, hint: str | None) -> dict:
+    """A warning for an image Roblox refuses for good, which is blank in Roblox too;
+    info for the rest, which only RHR's render leaves out."""
+    from rhr.missing_images import refused_by_roblox
+
+    severity = "warning" if refused_by_roblox(reason) else "info"
+    detail = f"{row['uri']} draws as nothing: {reason}" + (f"; {hint}" if hint else "")
+    return _finding("image-missing", severity, row, detail)
 
 
 def check_zero_size_grid_cell(nodes: list[dict], _ctx: dict) -> list[dict]:
@@ -529,15 +557,18 @@ def _sort(findings: list[dict]) -> list[dict]:
 
 
 def run_checks(dump: dict, image_paths: set[str] | None = None,
-               missing_images: dict[str, tuple[str, str]] | None = None) -> list[dict]:
+               missing_images: dict[str, tuple[str, str]] | None = None,
+               undrawn_images: list[dict] | None = None) -> list[dict]:
     """Every finding in the dump, sorted by (severity, path, check). `missing_images`:
-    path -> (uri, why) for images known to be unavailable."""
+    path -> (uri, why) for images known to be unavailable; `undrawn_images`: the
+    `missingAssets` rows (rhr.missing_images.explain) for the dump's render."""
     nodes = dump.get("nodes") or []
     ctx = {
         "viewport": tuple(dump.get("viewport") or (0, 0)),
         "by_path": {entry["path"]: entry for entry in nodes},
         "image_paths": image_paths or set(),
         "missing_images": missing_images or {},
+        "undrawn_images": undrawn_images or [],
         "device": __import__("rhr.devices", fromlist=["CURRENT"]).CURRENT,
     }
     findings: list[dict] = []
@@ -555,13 +586,16 @@ def check_model(ir_path, width: int, height: int, topbar_height: float | None = 
     """
     from rhr.ir import cached_ir, load_ir
     from rhr.layout_dump import build_dump
+    from rhr.missing_images import explain
+    from rhr.ui_engine.assets import record_undrawn
 
     ir_path = Path(ir_path)
     if ir_path.suffix != ".json":
         ir_path = cached_ir(ir_path)
-    dump = build_dump(ir_path, width, height, topbar_height=topbar_height)
+    with record_undrawn() as undrawn:
+        dump = build_dump(ir_path, width, height, topbar_height=topbar_height)
     ir = load_ir(ir_path)
-    findings = run_checks(dump, _image_paths(ir), _missing_images(ir))
+    findings = run_checks(dump, _image_paths(ir), _missing_images(ir), explain(undrawn))
     findings = _sort(findings + _blocked_buttons(ir_path, width, height, topbar_height, dump))
 
     left_out = {"severity": 0, "ignored": 0, "attribute": 0, "baseline": 0}

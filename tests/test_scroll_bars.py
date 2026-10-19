@@ -32,9 +32,10 @@ from _models import (  # noqa: E402
     QUADRANTS, colour3, content, item, offset, quadrant_cache, rgb, scale, token, udim, udim2, vec2, write_model,
 )
 from rhr import scrolling  # noqa: E402
-from rhr.cli import _prepare_ui_images  # noqa: E402
 from rhr.ir import load_ir, resolve_path  # noqa: E402
+from rhr.missing_images import explain  # noqa: E402
 from rhr.pipeline import render_ir  # noqa: E402
+from rhr.ui_engine.assets import record_undrawn  # noqa: E402
 from rhr.ui_layout import lay_out_pane  # noqa: E402
 from test_fixtures import FIXTURES, emit_ir  # noqa: E402
 
@@ -115,6 +116,7 @@ EXTRA_CELLS = [
     ("Mixed", 10, 10, 80, 380, True, 760, (DEFAULTS[0], MID, DEFAULTS[2])),
     ("MissingId", 100, 10, 80, 380, True, 760, (UNCACHED, "", "")),
     ("MissingFile", 190, 10, 80, 380, True, 760, (OTHER_FILE, "", "")),
+    ("MissingThumb", 280, 10, 80, 380, True, 760, (THUMBNAIL, "", "")),
 ]
 
 
@@ -448,7 +450,8 @@ def check_bars(check) -> None:
                     problems.append(f"track past the thumb at {fmt(point)}: {fmt(pixel(img, point))}")
             check(not problems, f"bar {name}: {summary(problems)}")
 
-        ir, _, img = render("bars_extra", bar_gui("BarExtra", EXTRA_CELLS), icons)
+        with record_undrawn() as undrawn:
+            _, _, img = render("bars_extra", bar_gui("BarExtra", EXTRA_CELLS), icons)
         cap = np.asarray(BAR_BG, float) + (255 - np.asarray(BAR_BG, float)) * BAR_ALPHA
         _, x, y, w, h, _, canvas, _ = EXTRA_CELLS[0]
         boxes = bar_boxes(w, h, True, canvas)
@@ -466,7 +469,7 @@ def check_bars(check) -> None:
                 problems.append(f"custom MidImage at {fmt(point)}: {fmt(pixel(img, point))}, Studio {fmt(want)}")
         check(not problems, f"bar Mixed, Roblox's own caps around a custom middle: {summary(problems)}")
 
-        missing = _prepare_ui_images(Path(ir), offline=True)
+        missing = explain(undrawn, offline=True, icons_dir=icons)
         for name, x, y, w, h, _, _, (uri, _, _) in EXTRA_CELLS[1:]:
             problems = []
             drawn = int((dist(img[y:y + h, x + w - BAR_T:x + w], BAR_BG) > 10).sum())
@@ -493,21 +496,11 @@ def check_rules(check) -> None:
         ("TopImage", "rbxassetid://123", "asset"),
         ("TopImage", "", "none"),
         ("TopImage", "rbxassetid://0", "none"),
-        ("TopImage", "garbage", "none"),
+        ("TopImage", "garbage", "missing"),
     ):
         got = scrolling.classify(part, value)
         check(got[0] == kind, f"{part} {value!r} draws as {kind} ({got})")
     check(scrolling.classify("MidImage", "rbxassetid://123") == ("asset", "123"), "an asset id draws from its id")
-
-    nodes = [
-        {"className": "ScrollingFrame", "path": "G/Unset", "props": {}},
-        {"className": "ScrollingFrame", "path": "G/Drawable",
-         "props": {"TopImage": "rbxassetid://5", "MidImage": "", "BottomImage": "rbxassetid://0"}},
-        {"className": "ScrollingFrame", "path": "G/Thumbnail", "props": {"MidImage": THUMBNAIL}},
-        {"className": "Frame", "path": "G/Frame", "props": {"MidImage": THUMBNAIL}},
-    ]
-    listed = [(entry["path"], entry["class"], entry["uri"]) for entry in scrolling.missing_bar_images(nodes)]
-    check(listed == [("G/Thumbnail", "ScrollingFrame", THUMBNAIL)], f"only the thumbnail is listed missing ({listed})")
 
 
 def check_ir(check) -> None:

@@ -92,10 +92,9 @@ tests/test_scroll_bars.py hold the cases): within 1.5 px of Studio on every one.
   id as Studio draws it: the top image over the thumb's first ScrollBarThickness, the
   bottom one over its last, the middle one stretched between; a horizontal bar turns
   each a quarter turn counter-clockwise. A bar image RHR cannot draw is left out, with
-  no stand-in: another file the Roblox client ships, a `rbxthumb://` thumbnail, or one
-  of Roblox's own bar images on a different part. `rhr ui --json` lists it in
-  `missingAssets`; `rhr check` reports `image-missing` only for an asset id Roblox
-  refused the last time RHR asked, as for any image.
+  no stand-in, and listed as any image is (Images, below): another file the Roblox
+  client ships, one of Roblox's own bar images on a different part, a `rbxthumb://`
+  thumbnail, an asset id not downloaded, or a link RHR does not read.
 
 Not measured, and drawn by the rule RHR picked: UIPadding's Scale in a ScrollingFrame
 (against the frame, as everywhere else); AutomaticCanvasSize with Scale-sized children
@@ -179,13 +178,37 @@ Known differences:
 
 ## Images
 
-Images are drawn from the local cache. `render`, `scene` and `preview` first download
-the ones the file uses that are not cached, as the Roblox Studio user (the original
-file, at full size); `--offline` skips that. Without a Studio login an image comes
-from Roblox's thumbnail service instead, at most 420 px, which puts sprite-sheet
-crops (`ImageRectOffset`, measured in the original's pixels) in the wrong place. A
-missing image leaves its area empty and is listed as a missing asset. ScrollingFrame
-bar images have their own rules (ScrollingFrame, under UI layout).
+Images are drawn from the local cache. `ui` and `scene` first download the ones the
+file uses that are not cached, as the Roblox Studio user (the original file, at full
+size); `preview` downloads the world's and its in-world UI's, not its ScreenGuis'.
+`--offline` skips that. Without a Studio login an image comes from Roblox's thumbnail
+service instead, at most 420 px, which puts sprite-sheet crops (`ImageRectOffset`,
+measured in the original's pixels) in the wrong place. ScrollingFrame bar images have
+their own rules (ScrollingFrame, under UI layout).
+
+An image RHR cannot draw leaves its area empty, with no stand-in, and the report's
+`missingAssets` lists it with the reason: an asset id not downloaded (`offline` with
+`--offline`), one Roblox refused, a file built into the Roblox client (`rbxasset://`),
+which the UI renderer does not read, a `rbxthumb://` thumbnail, which Roblox makes at
+run time, or a link RHR does not read. Only an image the picture would show is listed:
+not a hidden or fully transparent one, one clipped away or off the screen, a
+HoverImage or PressedImage, or an empty Image or id 0, which Roblox draws as nothing
+too. A BillboardGui's or SurfaceGui's images are listed when its own picture leaves
+them out, whether or not the camera sees it. Each row names the instance (`path`,
+`class`), the part of the screen the image would cover (`rect`, in screen pixels: the
+bounding box of a rotated or in-world one, cut to what the screen and any clipping
+frame show) and, where RHR can say, how to get it drawn (`hint`); with
+`scene --views`, the view it is missing from (`view`). A 3D asset's row (a mesh, a
+decal) has no `rect`, and a ViewportFrame's 3D content is not listed.
+
+`rhr check` draws the UI without downloading anything and reports each image its
+render leaves out as `image-missing`, with the same reason and hint: a warning for an
+image Roblox refuses for good (shown as unavailable, no such asset, not an image),
+which is blank in Roblox too, and info for one only RHR's render leaves out (a file
+built into the client, a thumbnail, a link RHR does not read, a download that failed
+on RHR's side). An id not downloaded yet is not reported; `rhr ui` downloads it. A
+HoverImage or PressedImage Roblox refused, on a visible element, is reported the same
+way, though no picture shows it.
 
 `ResampleMode` (Default = smooth, Pixelated = nearest) is honoured for Stretch, Fit
 and Crop. Tile and Slice filtering have not been checked.
@@ -427,7 +450,8 @@ ScreenGui, and RHR draws them by the same rules (ScrollingFrame, under UI layout
 The 3D content is drawn with the same scene renderer and placed at the frame's
 rectangle. Supported: parts, the frame's own `CameraCFrame` or a child Camera,
 Ambient, LightColor, LightDirection, ImageColor3 and ImageTransparency. Not
-supported: shadows, Sky, post-processing and GUI objects inside the frame. Not yet
+supported: shadows, Sky, post-processing and GUI objects inside the frame, and
+`missingAssets` does not list a mesh or texture its content leaves out. Not yet
 compared with Studio.
 
 ## Effects

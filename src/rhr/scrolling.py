@@ -19,8 +19,9 @@ holds the cases):
     a horizontal bar, each image turned a quarter turn counter-clockwise), tinted by
     ScrollBarImageColor3 and faded by ScrollBarImageTransparency. Roblox's own images,
     which RHR can't ship, are drawn as the shape they make in their own places; a
-    custom image is drawn from its asset id; another file the client ships, or a
-    thumbnail, draws nothing and `missing_bar_images` lists it.
+    custom image is drawn from its asset id; one RHR can't draw (another file the
+    client ships, a thumbnail, an id not downloaded) draws nothing, and the render
+    lists it in `missingAssets` (rhr.missing_images).
   * A frame with ScrollingEnabled false still draws its bars.
 
 Not measured: bars against the frame's UICorner (drawn inside it); thickness,
@@ -36,6 +37,7 @@ import math
 from dataclasses import dataclass
 
 from rhr.fetch import asset_id
+from rhr.missing_images import CLIENT_FILE, THUMBNAIL, UNKNOWN_LINK, no_image
 from rhr.studio import content_path
 
 BAR_IMAGES = {
@@ -179,30 +181,18 @@ def solve(node: dict, frame: Rect, scale: float, raw: tuple[float, float]) -> Sc
 
 def classify(part: str, value: str) -> tuple[str, str]:
     """How a bar part's image draws: ("default", "") as Roblox's own, ("asset", id),
-    ("missing", why) or ("none", "") for a value Roblox draws nothing for either."""
+    ("missing", why) for one RHR can't draw, or ("none", "") for a value Roblox draws
+    nothing for either (rhr.missing_images.no_image)."""
     path = content_path(value)
     if path is not None:
         if path == content_path(BAR_IMAGES[part]):
             return "default", ""
-        return "missing", "a file built into the Roblox client, which RHR's UI renderer does not read"
+        return "missing", CLIENT_FILE
     ref = asset_id(value)
     if ref:
         return "asset", ref
     if value.startswith("rbxthumb://"):
-        return "missing", "a thumbnail Roblox makes at run time"
-    return "none", ""
-
-
-def missing_bar_images(nodes) -> list[dict]:
-    """The bar images of these nodes' ScrollingFrames that no asset id can supply:
-    {path, class, uri, reason}. Asset ids are rhr.fetch.image_uses' to report."""
-    missing = []
-    for node in nodes:
-        if node.get("className") != "ScrollingFrame" or not node.get("path"):
-            continue
-        for part in BAR_IMAGES:
-            uri = _image(node, part)
-            kind, why = classify(part, uri)
-            if kind == "missing":
-                missing.append({"path": node["path"], "class": "ScrollingFrame", "uri": uri, "reason": why})
-    return missing
+        return "missing", THUMBNAIL
+    if no_image(value):
+        return "none", ""
+    return "missing", UNKNOWN_LINK

@@ -55,7 +55,7 @@ picture; a cropped picture before a full one).
 | ... on phones and tablets | `rhr check <file> --devices all` | findings with `devices` |
 | Where every UI element is | `rhr layout <file>` (`--path <screen>`) | `rects[path]` = `{x, y, w, h}` in pixels |
 | What each element is made of, how its text laid out | `rhr layout <file> --rich --path <screen>` | `nodes[]`: class, rect, zIndex, colours, `text.drawnSize`, `text.lines`, `text.bounds` in `text.box` |
-| What a screen looks like | `rhr ui <file> --only <screen> --fit --out ui.png --json` | the PNG; `missingAssets` (images that draw as nothing, and why) |
+| What a screen looks like | `rhr ui <file> --only <screen> --fit --out ui.png --json` | the PNG; `missingAssets` (each image that draws as nothing: why, its `rect` on the screen, a `hint`) |
 | One element, small | `rhr ui <file> --crop <path> --max-size 400 --out el.png` | the PNG |
 | What it looks like on a phone | `rhr ui <file> --device phone --out phone.png` | the PNG at 852x393 with the notch insets |
 | What a player would click at a pixel | `rhr hitmap <file> --at X,Y` | `hitTests[0].target`, every interactive element under it |
@@ -127,7 +127,8 @@ Measured against Studio:
   approximations (lighting, fog and shadows fitted to Studio).
 
 What RHR tells you it did not do exactly: `missingAssets` (images, meshes, unions it
-could not get), `fallbacks` (meshes drawn as boxes), `unsupportedVisualClasses`,
+could not get or draw; a UI image's row adds why, where it would be on the screen and
+how to get it drawn), `fallbacks` (meshes drawn as boxes), `unsupportedVisualClasses`,
 `experimental` (Atmosphere, post effects, local lights, decals; materials without
 Studio) and `notes`, in the `--json` reports and `scene-dump`; the same on stderr for
 people. Effects are one still frame (`--effect-time T` for another moment). In a
@@ -136,8 +137,14 @@ note names them and `--focus <path>` draws one. docs/known-approximations.md lis
 every known difference.
 
 `check` findings: fix `error`; weigh `warning`; `info` (`--min-severity info`) are
-patterns that are often intended. An instance the maintainer wants left alone can
-carry an `RhrIgnore` string attribute ("all", or check ids separated by commas).
+patterns that are often intended, and images only RHR's picture leaves out. An
+`image-missing` warning is an image Roblox refuses for good (deleted, private,
+moderated, no such asset, not an image): it is blank in Roblox too, so use another. At
+`info`, `image-missing` is an image only RHR's picture leaves out (a file built into
+the client, a thumbnail, one RHR could not download): its detail says why and how to
+get it drawn, and a reviewer of the picture should be told. An id not downloaded yet
+is not reported; `rhr ui` downloads it. An instance the maintainer wants left alone
+can carry an `RhrIgnore` string attribute ("all", or check ids separated by commas).
 
 RHR does not run a game's scripts, physics or animation: a UI a script builds or
 moves at run time is shown as saved; for UI built by code, use a story.

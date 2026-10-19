@@ -264,6 +264,7 @@ def _destination(kind: str, asset: str) -> Path:
 # other. Drawn as a texture it becomes a white square; Studio draws nothing there.
 # Two variants seen: the older grey icon, and a question mark on two cards (an id
 # that is no asset, 2026-09-28).
+UNAVAILABLE = "Roblox shows it as unavailable"
 UNAVAILABLE_THUMBNAILS = {"e5bef3179d5ce82a42fdc8ddc83a2ba9", "b566251226e913461da0d9d16687e93f"}
 
 
@@ -573,7 +574,7 @@ def _thumbnails(ids: set[str], log) -> dict[str, str]:
         path = cache_dir / f"{asset}.png"
         if path.is_file() and _is_unavailable(path):
             path.unlink(missing_ok=True)
-            results[asset] = "missing (Roblox shows it as unavailable)"
+            results[asset] = f"missing ({UNAVAILABLE})"
         else:
             results[asset] = "fetched" if path.is_file() else "missing (no thumbnail)"
     return results

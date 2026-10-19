@@ -3,6 +3,8 @@
 import json
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 
@@ -180,6 +182,54 @@ def _resample_sampling(node: dict) -> skia.SamplingOptions:
     return PIXELATED_SAMPLING if node.get("resampleMode") == "Pixelated" else DEFAULT_SAMPLING
 
 
+_undrawn: ContextVar[list[dict] | None] = ContextVar("rhr_undrawn", default=None)
+
+
+@contextmanager
+def record_undrawn():
+    """While open, collect each image the renders in this thread draw as nothing where
+    the picture shows it, once each: {path, class, uri, key, rect}, where *uri* is the
+    image as authored, *key* what the renderer looked up for it, and *rect* ({x, y, w, h})
+    the part of the picture it would cover. `rhr.missing_images` says why."""
+    found: list[dict] = []
+    token = _undrawn.set(found)
+    try:
+        yield found
+    finally:
+        _undrawn.reset(token)
+
+
+@contextmanager
+def ignore_undrawn():
+    """While open, the renders in this thread note nothing, even inside record_undrawn."""
+    token = _undrawn.set(None)
+    try:
+        yield
+    finally:
+        _undrawn.reset(token)
+
+
+def recording_undrawn() -> bool:
+    return _undrawn.get() is not None
+
+
+def note_undrawn(canvas: skia.Canvas, rect: skia.Rect, path: str | None, cls: str | None, uri: str,
+                 key: str = "") -> None:
+    """Note an image that draws as nothing at *rect*, with the part of the picture it
+    would cover, unless it would cover none."""
+    found = _undrawn.get()
+    if found is None or not uri:
+        return
+    shown = canvas.getTotalMatrix().mapRect(rect)
+    if not shown.intersect(skia.Rect.Make(canvas.getDeviceClipBounds())):
+        return
+    entry = {"path": path, "class": cls, "uri": uri, "key": key,
+             "rect": {"x": round(shown.x(), 3), "y": round(shown.y(), 3),
+                      "w": round(shown.width(), 3), "h": round(shown.height(), 3)}}
+    if entry not in found:
+        found.append(entry)
+
+
 def _draw_image_with_gradient(
     canvas: skia.Canvas, image: skia.Image, src_rect: skia.Rect, dst: skia.Rect,
     alpha: int, gradient: dict, tint: list | None, transparency: float,
@@ -224,7 +274,7 @@ def draw_image(
     gradient: dict | None = None,
 ) -> None:
     """Draw an image within the element rect, respecting scaleType and tint."""
-    if image is None or w <= 0 or h <= 0:
+    if w <= 0 or h <= 0:
         return
 
     # Accept legacy aliases used by older outputs/models.
@@ -238,6 +288,10 @@ def draw_image(
 
     alpha = max(0, min(255, round((1 - transparency) * 255)))
     if alpha == 0:
+        return
+    if image is None:
+        note_undrawn(canvas, skia.Rect.MakeXYWH(x, y, w, h), node.get("_path"), node.get("type"),
+                     node.get("_image", ""), node.get("icon", ""))
         return
 
     # Clip image to UICorner shape so it doesn't paint over rounded corners

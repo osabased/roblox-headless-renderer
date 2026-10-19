@@ -22,6 +22,7 @@ class _SceneHandler(http.server.SimpleHTTPRequestHandler):
     ir_path: Path
     metadata_sink: dict | None = None
     camera_log: list | None = None
+    undrawn_out: list | None = None
     asset_manifest_payload: bytes = b"{}"
     mesh_manifest_payload: bytes = b"{}"
     asset_files: dict[str, Path] = {}
@@ -181,6 +182,7 @@ class _SceneHandler(http.server.SimpleHTTPRequestHandler):
 
         from rhr.ir import load_ir
         from rhr.pipeline import render_gui_node
+        from rhr.ui_engine.assets import record_undrawn
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -200,13 +202,15 @@ class _SceneHandler(http.server.SimpleHTTPRequestHandler):
             key = (str(request["path"]), int(request["width"]), int(request["height"]), images_stamp)
             cached = drawn.get(key)
             if cached is None:
-                with tempfile.TemporaryDirectory(prefix="rhr-gui-") as tmp:
+                with tempfile.TemporaryDirectory(prefix="rhr-gui-") as tmp, record_undrawn() as undrawn:
                     out, offset = render_gui_node(
                         self.ir_cache, str(request["path"]), int(request["width"]), int(request["height"]),
                         Path(tmp) / "gui.png",
                     )
-                    cached = drawn[key] = (out.read_bytes(), offset)
-            payload, offset = cached
+                    cached = drawn[key] = (out.read_bytes(), offset, undrawn)
+            payload, offset, undrawn = cached
+            if self.undrawn_out is not None:
+                self.undrawn_out.extend(_on_screen(undrawn, request, offset, struct.unpack(">II", payload[16:24])))
         except Exception as exc:  # reported to the page, which fails the render loudly
             body = f"{type(exc).__name__}: {exc}".encode()
             self.send_response(500)
@@ -226,6 +230,77 @@ class _SceneHandler(http.server.SimpleHTTPRequestHandler):
 
     def log_message(self, format, *_args):
         return
+
+
+def _on_screen(undrawn: list[dict], request: dict, offset, size) -> list[dict]:
+    """*undrawn*, noted in an in-world GUI's picture of *size*, with each rect moved to
+    where the page shows that picture (scene.js renderGuiImage) and cut to the screen,
+    and the page's view if it names one. An image off the screen is dropped."""
+    place = request.get("place") or {}
+    screen = request.get("screen") or ()
+    out = []
+    for entry in undrawn:
+        row = {key: value for key, value in entry.items() if key != "rect"}
+        if entry.get("rect") and place and len(screen) == 2:
+            rect = _screen_rect(entry["rect"], place, request, offset, size, screen)
+            if rect is None:
+                continue
+            row["rect"] = rect
+        if request.get("view"):
+            row["view"] = str(request["view"])
+        out.append(row)
+    return out
+
+
+def _screen_rect(rect: dict, place: dict, request: dict, offset, size, screen) -> dict | None:
+    """*rect* in the GUI's picture, on the screen: the page draws the picture at its own
+    size, shifted by *offset*, when it is not the size it asked for, else stretched over
+    the GUI's box; a SurfaceGui's box is mapped onto its face's corners."""
+    asked = (int(request["width"]), int(request["height"]))
+    surface = "corners" in place
+    box = (float(place["width"]), float(place["height"])) if surface else asked
+    natural = tuple(offset) != (0, 0) or tuple(size) != asked
+
+    def element(x: float, y: float) -> tuple[float, float]:
+        if natural:
+            return x - offset[0], y - offset[1]
+        return x * box[0] / size[0], y * box[1] / size[1]
+
+    corners = [element(rect["x"] + dx, rect["y"] + dy) for dx in (0, rect["w"]) for dy in (0, rect["h"])]
+    if surface:
+        face = _square_to_quad(place["corners"])
+        corners = [face(min(max(x / box[0], 0.0), 1.0), min(max(y / box[1], 0.0), 1.0)) for x, y in corners]
+    else:
+        corners = [(x + place["left"], y + place["top"]) for x, y in corners]
+    left = max(min(x for x, _ in corners), 0.0)
+    top = max(min(y for _, y in corners), 0.0)
+    right = min(max(x for x, _ in corners), float(screen[0]))
+    bottom = min(max(y for _, y in corners), float(screen[1]))
+    if right <= left or bottom <= top:
+        return None
+    return {"x": round(left, 3), "y": round(top, 3), "w": round(right - left, 3), "h": round(bottom - top, 3)}
+
+
+def _square_to_quad(corners):
+    """The projective map of the unit square onto *corners* (top-left, top-right,
+    bottom-right, bottom-left), as scene.js surfaceHomography lays a SurfaceGui's
+    picture on its face."""
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = corners
+    dx1, dx2, dx3 = x1 - x2, x3 - x2, x0 - x1 + x2 - x3
+    dy1, dy2, dy3 = y1 - y2, y3 - y2, y0 - y1 + y2 - y3
+    denominator = dx1 * dy2 - dx2 * dy1
+    g = h = 0.0
+    if abs(denominator) >= 1e-8:
+        g = (dx3 * dy2 - dx2 * dy3) / denominator
+        h = (dx1 * dy3 - dx3 * dy1) / denominator
+    a, b, c = x1 - x0 + g * x1, x3 - x0 + h * x3, x0
+    d, e, f = y1 - y0 + g * y1, y3 - y0 + h * y3, y0
+
+    def point(u: float, v: float) -> tuple[float, float]:
+        w = g * u + h * v + 1
+        return (a * u + b * v + c) / w, (d * u + e * v + f) / w
+
+    return point
 
 
 _ASSET_EXTENSIONS = ("png", "webp", "jpg", "jpeg", "svg")
@@ -394,8 +469,10 @@ def _png_size(path: Path) -> tuple[int, int]:
 
 def scene_handler(ir_path: Path, asset_files: dict | None = None, mesh_files: dict | None = None, *,
                   metadata_sink: dict | None = None, notes_out: list[str] | None = None, base=None,
-                  camera_log: list | None = None) -> type:
-    """The request handler that serves the scene page and one scene's data."""
+                  camera_log: list | None = None, undrawn_out: list | None = None) -> type:
+    """The request handler that serves the scene page and one scene's data. `undrawn_out`
+    gets the images its in-world GUIs draw as nothing (rhr.ui_engine.assets.record_undrawn),
+    each with its `rect` on the screen and the page's `view`."""
     return type(
         "RHRSceneHandler",
         (base or _SceneHandler,),
@@ -403,6 +480,7 @@ def scene_handler(ir_path: Path, asset_files: dict | None = None, mesh_files: di
             "ir_path": ir_path,
             "metadata_sink": metadata_sink,
             "camera_log": camera_log,
+            "undrawn_out": undrawn_out,
             "page_notes": notes_out if notes_out is not None else [],
             "asset_manifest_payload": json.dumps({
                 asset_id: _versioned("/__rhr_asset__/", asset_id, path)
@@ -437,6 +515,7 @@ def _render_browser(
     notes_out: list[str] | None = None,
     more_views: list[tuple[str, Path]] = (),
     camera_log: list | None = None,
+    undrawn_out: list | None = None,
 ) -> tuple[int, int]:
     """Render one local browser page and return its verified PNG dimensions.
 
@@ -452,7 +531,7 @@ def _render_browser(
         view_out.parent.mkdir(parents=True, exist_ok=True)
     drawn = 0
     handler = scene_handler(ir_path, asset_files, mesh_files, metadata_sink=metadata_sink, notes_out=notes_out,
-                            camera_log=camera_log)
+                            camera_log=camera_log, undrawn_out=undrawn_out)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(
         target=lambda: server.serve_forever(poll_interval=0.01),
@@ -498,7 +577,7 @@ def _render_browser(
         del camera_log[1 + drawn:]  # a view that failed part way may have reported its camera
     for view_query, view_out in more_views[drawn:]:
         _render_browser(ir_path, view_out, width, height, page, view_query, asset_files=asset_files,
-                        mesh_files=mesh_files, notes_out=notes_out, camera_log=camera_log)
+                        mesh_files=mesh_files, notes_out=notes_out, camera_log=camera_log, undrawn_out=undrawn_out)
     for picture in [out, *(view_out for _, view_out in more_views)]:
         if not picture.is_file() or picture.stat().st_size == 0:
             raise RuntimeError(f"the browser did not write a screenshot: {picture}")
@@ -543,6 +622,7 @@ def render_scene(
     seed: int = 0,
     more_views: list[tuple[str, Path]] = (),
     camera_log: list | None = None,
+    undrawn_out: list | None = None,
 ) -> tuple[int, int]:
     """Render the 3D scene to a PNG through headless Chromium.
 
@@ -550,7 +630,9 @@ def render_scene(
     seconds after it starts, or the fullest moment when None. `effects=False` leaves
     out particles, Beams and Trails. `more_views` ([(view, out)]) draws the scene
     from other standard views too, on the same build when it can; `camera_log` gets
-    each picture's camera in order.
+    each picture's camera in order. `undrawn_out` gets the images the in-world GUIs
+    draw as nothing (rhr.ui_engine.assets.record_undrawn), each with its `rect` on the
+    screen and, from a standard view, that `view`.
     """
     query_values: dict[str, str | float] = {}
     if not effects:
@@ -616,6 +698,7 @@ def render_scene(
         notes_out=notes_out,
         more_views=[(urlencode({**query_values, "view": name}), view_out) for name, view_out in more_views],
         camera_log=camera_log,
+        undrawn_out=undrawn_out,
     )
 
 

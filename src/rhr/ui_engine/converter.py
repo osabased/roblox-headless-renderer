@@ -575,6 +575,9 @@ def flatten_node(raw: dict) -> dict:
     image = props.get("Image")
     if image:
         result["icon"] = image
+        # As authored: postprocess may swap `icon` for an icon of its own, and the
+        # missing-images list names what the file asked for.
+        result["_image"] = image
 
     # ImageRect atlas cropping
     raw_image_rect_size = props.get("ImageRectSize")

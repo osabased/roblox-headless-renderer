@@ -4623,7 +4623,7 @@ function findBillboards(index) {
 // In-world UI is drawn by the same 2D engine as ScreenGuis: the page asks the local
 // server to render the GUI subtree at its canvas size and places the PNG. A failed
 // render fails the page (data-rhr-error) instead of leaving the GUI out.
-async function renderGuiImage(node, canvasWidth, canvasHeight) {
+async function renderGuiImage(node, canvasWidth, canvasHeight, place) {
   const response = await fetch('/__rhr_gui__.png', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -4631,6 +4631,11 @@ async function renderGuiImage(node, canvasWidth, canvasHeight) {
       path: node.path,
       width: Math.max(1, Math.round(canvasWidth)),
       height: Math.max(1, Math.round(canvasHeight)),
+      // Where the picture lands on the screen, so the server can say where each
+      // image it leaves out would be.
+      place,
+      screen: [width, height],
+      view: params.get('view'),
     }),
   });
   if (!response.ok) throw new Error(`in-world GUI ${node.path}: ${await response.text()}`);
@@ -4746,14 +4751,16 @@ async function addBillboards(index, camera) {
     const sizeOffset = node.props?.SizeOffset || {};
     const sizeOffsetX = Number(sizeOffset.X || 0);
     const sizeOffsetY = Number(sizeOffset.Y || 0);
+    const left = Math.round((projected.x * 0.5 + 0.5) * width - widthPx / 2 + sizeOffsetX * widthPx);
+    const top = Math.round((-projected.y * 0.5 + 0.5) * height - heightPx / 2 - sizeOffsetY * heightPx);
     root.style.position = 'absolute';
-    root.style.left = `${Math.round((projected.x * 0.5 + 0.5) * width - widthPx / 2 + sizeOffsetX * widthPx)}px`;
-    root.style.top = `${Math.round((-projected.y * 0.5 + 0.5) * height - heightPx / 2 - sizeOffsetY * heightPx)}px`;
+    root.style.left = `${left}px`;
+    root.style.top = `${top}px`;
     root.style.width = `${widthPx}px`;
     root.style.height = `${heightPx}px`;
     root.style.zIndex = overlayZIndex(Boolean(node.props?.AlwaysOnTop), depth);
     root.style.pointerEvents = 'none';
-    if (hasGuiContent(node)) root.appendChild(await renderGuiImage(node, widthPx, heightPx));
+    if (hasGuiContent(node)) root.appendChild(await renderGuiImage(node, widthPx, heightPx, {left, top}));
     overlay.appendChild(root);
   }
 }
@@ -4880,7 +4887,11 @@ async function addSurfaceGuis(index, camera) {
         right - left,
         bottom - top,
       );
-      canvasElement.appendChild(await renderGuiImage(node, virtualWidth, virtualHeight));
+      canvasElement.appendChild(await renderGuiImage(node, virtualWidth, virtualHeight, {
+        corners: screen.map(point => [point.x, point.y]),
+        width: right - left,
+        height: bottom - top,
+      }));
       root.appendChild(canvasElement);
     }
     overlay.appendChild(root);

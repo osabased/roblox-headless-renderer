@@ -214,8 +214,9 @@ def _camera_json(state: dict) -> dict | None:
         return None
 
 
-def _world_report(scene_dump: dict) -> dict:
-    """What a 3D render approximated or could not draw, from its scene dump."""
+def _world_report(scene_dump: dict, missing_images: list[dict]) -> dict:
+    """What a 3D render approximated or could not draw: what its scene dump says, then
+    *missing_images*, the rows of rhr.missing_images.explain for its GUIs."""
     return {
         "fallbacks": scene_dump["fallbacks"],
         "materialFallbacks": scene_dump["materialFallbacks"],
@@ -224,7 +225,7 @@ def _world_report(scene_dump: dict) -> dict:
         "missingAssets": [
             {"path": item["path"], "class": item["class"], "uri": item.get("uri")}
             for item in scene_dump["assetReferences"] if not item["available"]
-        ],
+        ] + missing_images,
     }
 
 
@@ -243,7 +244,10 @@ def _inset_json(inset) -> dict:
 
 
 def _ui(args) -> int:
+    from rhr import fetch
+    from rhr.missing_images import explain
     from rhr.pipeline import load_screens, render_screens
+    from rhr.ui_engine.assets import record_undrawn
 
     source = Path(args.file)
     if not source.exists():
@@ -258,17 +262,19 @@ def _ui(args) -> int:
         ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
     except (ValueError, RuntimeError) as exc:
         return _die(str(exc))
-    missing_images = _prepare_ui_images(ir_path, args.offline)
+    statuses = _prepare_ui_images(ir_path, args.offline)
     t_ir = time.perf_counter()
 
     try:
         screens = load_screens(str(ir_path), width, height, args.topbar_height, required=True)
-        png = render_screens(
-            screens, out, width, height, bg_color=bg, rect_map=rect_map, source_ir=ir_path
-        )
+        with record_undrawn() as undrawn:
+            png = render_screens(
+                screens, out, width, height, bg_color=bg, rect_map=rect_map, source_ir=ir_path
+            )
     except ValueError as exc:
         return _die(str(exc))
     t_render = time.perf_counter()
+    missing_images = explain(undrawn, statuses, offline=args.offline or fetch.offline())
 
     print(f"ir     {ir_path}  {int((t_ir - t0) * 1000)}ms", file=sys.stderr)
     for _, _, inset, name in screens:
@@ -281,6 +287,8 @@ def _ui(args) -> int:
         file=sys.stderr,
     )
     print(f"total  {int((t_render - t0) * 1000)}ms", file=sys.stderr)
+    if missing_images:
+        print(f"note   {_missing_images_line(missing_images)}", file=sys.stderr)
     stored = _stored_gui_note(ir_path)
 
     if rect_map is not None:
@@ -414,8 +422,9 @@ def _layout(args) -> int:
     return 0
 
 
-def _prepare_scene_assets(ir_path: Path, offline: bool, focus: str | None = None) -> None:
+def _prepare_scene_assets(ir_path: Path, offline: bool, focus: str | None = None) -> dict[str, str]:
     """Before a 3D render: fetch what it needs and is not cached, and say what is missing.
+    Returns rhr.fetch.ensure's answer for each image it asked for: id -> status.
 
     RHR expects Roblox Studio on the machine and signed in; the download runs as that
     Studio user (rhr.fetch). Nothing is downloaded that is already cached.
@@ -431,41 +440,39 @@ def _prepare_scene_assets(ir_path: Path, offline: bool, focus: str | None = None
             "textures, meshes and unions use stand-ins, so this looks less like Roblox than it "
             "would with Studio (docs/known-approximations.md)")
     if offline or fetch.offline():
-        return
+        return {}
     try:
-        fetch.ensure_for_ir(ir_path, log=say, focus=focus)
+        return fetch.ensure_for_ir(ir_path, log=say, focus=focus).get("images", {})
     except Exception as exc:  # noqa: BLE001 - a failed download must not fail the render
         say(f"note   fetching assets failed ({type(exc).__name__}: {exc}); drawing with what is cached")
+        return {}
 
 
-def _prepare_ui_images(ir_path: Path, offline: bool) -> list[dict]:
+def _prepare_ui_images(ir_path: Path, offline: bool) -> dict[str, str]:
     """Before a UI render: download the images it uses that are not cached (rhr.fetch).
-    Returns what is still missing, for the report: {path, class, uri, reason}."""
-    from rhr import fetch, scrolling
+    Returns rhr.fetch.ensure's answer for each: id -> status."""
+    from rhr import fetch
     from rhr.adapter import ui_nodes
     from rhr.ir import load_ir
 
-    nodes = list(ui_nodes(load_ir(ir_path)))  # the UI's images, not the 3D world's
-    uses = fetch.image_uses(nodes)
-    statuses: dict[str, str] = {}
-    if uses and not (offline or fetch.offline()):
-        try:
-            statuses = fetch.ensure({"images": set(uses)}, log=lambda message: print(message, file=sys.stderr))["images"]
-        except Exception as exc:  # noqa: BLE001 - a failed download must not fail the render
-            print(f"note   fetching images failed ({type(exc).__name__}: {exc}); drawing with what is cached",
-                  file=sys.stderr)
-    missing = []
-    for asset in sorted(uses, key=lambda value: (len(value), value)):
-        status = statuses.get(asset) or ("cached" if fetch._cached("images", asset) else "missing (offline)")
-        if status.startswith("missing"):
-            reason = status.removeprefix("missing").strip(" ()") or "unavailable"
-            missing += [{**use, "reason": reason} for use in uses[asset]]
-    missing += scrolling.missing_bar_images(nodes)
-    if missing:
-        shown = ", ".join(sorted({item["path"] for item in missing})[:4])
-        print(f"note   {len(missing)} image(s) could not be had and draw as nothing: {shown}"
-              + (" ..." if len(missing) > 4 else ""), file=sys.stderr)
-    return missing
+    if offline or fetch.offline():
+        return {}
+    uses = fetch.image_uses(ui_nodes(load_ir(ir_path)))  # the UI's images, not the 3D world's
+    if not uses:
+        return {}
+    try:
+        return fetch.ensure({"images": set(uses)}, log=lambda message: print(message, file=sys.stderr))["images"]
+    except Exception as exc:  # noqa: BLE001 - a failed download must not fail the render
+        print(f"note   fetching images failed ({type(exc).__name__}: {exc}); drawing with what is cached",
+              file=sys.stderr)
+        return {}
+
+
+def _missing_images_line(rows: list[dict]) -> str:
+    images = {(str(row["path"]), row["uri"]) for row in rows}
+    paths = sorted({path for path, _ in images})
+    return (f"{len(images)} image(s) draw as nothing (missingAssets says why): {', '.join(paths[:4])}"
+            + (" ..." if len(paths) > 4 else ""))
 
 
 def _fetch(args) -> int:
@@ -684,6 +691,8 @@ def _hitmap(args) -> int:
 
 
 def _scene(args) -> int:
+    from rhr import fetch
+    from rhr.missing_images import explain
     from rhr.scene import render_scene
 
     source = Path(args.file)
@@ -711,10 +720,11 @@ def _scene(args) -> int:
             from rhr.ir import world_ir
 
             ir_path = world_ir(ir_path, args.focus)
-            _prepare_scene_assets(ir_path, args.offline, args.focus)
+            statuses = _prepare_scene_assets(ir_path, args.offline, args.focus)
         page_notes: list[str] = []
         camera_state: dict = {}
         cameras: list[dict] = []
+        undrawn: list[dict] = []
         with phase("browser render (total)"):
             actual = render_scene(
                 ir_path,
@@ -728,6 +738,7 @@ def _scene(args) -> int:
                 view=views[0] if views else args.view,
                 more_views=list(zip(views[1:], outs[1:])) if views else [],
                 camera_log=cameras,
+                undrawn_out=undrawn,
                 shadows=not args.no_shadows,
                 flat_materials=args.flat_materials,
                 texture_dir=texture_dir,
@@ -749,19 +760,22 @@ def _scene(args) -> int:
         return _die(_no_world_hint(str(exc), args))
     elapsed = int((time.perf_counter() - t0) * 1000)
     page_notes = list(dict.fromkeys(page_notes))  # each view reports the scene's notes
+    missing_images = explain(undrawn, statuses, offline=args.offline or fetch.offline(), views=bool(views))
     print(f"ir     {ir_path}", file=sys.stderr)
     for picture in (outs if views else [out]):
         print(f"scene  {picture}  {actual[0]}x{actual[1]}  {elapsed}ms", file=sys.stderr)
     print(notes_line(scene_dump), file=sys.stderr)
     for note in page_notes:
         print(f"note   {note}", file=sys.stderr)
+    if missing_images:
+        print(f"note   {_missing_images_line(missing_images)}", file=sys.stderr)
     report = {
         "command": "scene",
         "source": str(source),
         "out": str(out),
         "size": list(actual),
         "camera": _camera_json(camera_state),
-        **_world_report(scene_dump),
+        **_world_report(scene_dump, missing_images),
         "notes": page_notes,
     }
     if views:
@@ -874,8 +888,11 @@ def _view(args) -> int:
 
 def _preview(args) -> int:
     from PIL import Image
+    from rhr import fetch
+    from rhr.missing_images import explain
     from rhr.pipeline import load_screens, render_screens
     from rhr.scene import render_scene
+    from rhr.ui_engine.assets import record_undrawn
 
     source = Path(args.file)
     if not source.exists():
@@ -892,13 +909,14 @@ def _preview(args) -> int:
         from rhr.ir import world_ir
 
         world_path = world_ir(ir_path, args.focus)
-        _prepare_scene_assets(world_path, args.offline, args.focus)
+        statuses = _prepare_scene_assets(world_path, args.offline, args.focus)
         with tempfile.TemporaryDirectory(prefix="rhr-preview-") as directory:
             tmp = Path(directory)
             world = tmp / "world.png"
             ui = tmp / "ui.png"
             page_notes: list[str] = []
             camera_state: dict = {}
+            undrawn: list[dict] = []
             render_scene(
                 world_path,
                 world,
@@ -918,6 +936,7 @@ def _preview(args) -> int:
                 effects=not args.no_effects,
                 effect_time=args.effect_time,
                 seed=args.seed,
+                undrawn_out=undrawn,
             )
             screens = load_screens(
                 str(ir_path),
@@ -928,14 +947,16 @@ def _preview(args) -> int:
             )
             with Image.open(world).convert("RGBA") as composite:
                 if screens:
-                    render_screens(
-                        screens,
-                        ui,
-                        width,
-                        height,
-                        bg_color=(0, 0, 0, 0),
-                        source_ir=ir_path,
-                    )
+                    with record_undrawn() as on_screen:
+                        render_screens(
+                            screens,
+                            ui,
+                            width,
+                            height,
+                            bg_color=(0, 0, 0, 0),
+                            source_ir=ir_path,
+                        )
+                    undrawn += on_screen
                     with Image.open(ui).convert("RGBA") as overlay:
                         composite.alpha_composite(overlay)
                 out.parent.mkdir(parents=True, exist_ok=True)
@@ -954,9 +975,12 @@ def _preview(args) -> int:
             page_notes.append(scene_dump["_storedNote"])
     except (ValueError, RuntimeError, OSError) as exc:
         return _die(f"the picture was written, but reading back what it approximated failed: {exc}")
+    missing_images = explain(undrawn, statuses, offline=args.offline or fetch.offline())
     print(notes_line(scene_dump), file=sys.stderr)
     for note in page_notes:
         print(f"note    {note}", file=sys.stderr)
+    if missing_images:
+        print(f"note    {_missing_images_line(missing_images)}", file=sys.stderr)
     stored = _stored_gui_note(ir_path)
     return _finish_picture(args, {
         "command": "preview",
@@ -965,7 +989,7 @@ def _preview(args) -> int:
         "size": [width, height],
         "camera": _camera_json(camera_state),
         "screens": [{"name": name, "inset": _inset_json(inset)} for _, _, inset, name in screens],
-        **_world_report(scene_dump),
+        **_world_report(scene_dump, missing_images),
         "notes": page_notes + ([stored] if stored else []),
     })
 
@@ -1244,7 +1268,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_check.add_argument("--min-severity", choices=("error", "warning", "info"), default="warning",
                          help="least severity reported (default: warning; info adds patterns that are "
-                              "often intended)")
+                              "often intended, and images only RHR's render leaves out)")
     p_check.add_argument("--ignore", action="append", default=[], metavar="CHECK",
                          help="leave out one check by id (repeatable)")
     p_check.add_argument("--baseline", metavar="JSON",

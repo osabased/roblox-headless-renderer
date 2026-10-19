@@ -8,7 +8,7 @@ import skia
 from .layout import Rect, resolve_rect, BASE_WIDTH, BASE_HEIGHT, layout_order_key
 from .visuals import draw_background, draw_stroke, make_gradient_shader, resolve_corner
 from .text import draw_text
-from .assets import DEFAULT_SAMPLING, load_icon, draw_image
+from .assets import DEFAULT_SAMPLING, load_icon, draw_image, note_undrawn, recording_undrawn
 
 _debug_paint: skia.Paint | None = None
 
@@ -437,6 +437,9 @@ def _draw_scroll_bars(canvas: skia.Canvas, node: dict, rect: Rect, scroll, icons
             kind, ref = kinds[part]
             image = load_icon(ref, icons_dir) if kind == "asset" and icons_dir is not None else None
             if image is None:
+                if kind in ("asset", "missing") and round(255 * opacity) > 0:
+                    note_undrawn(canvas, skia.Rect.MakeXYWH(x, y, w, h), node.get("_path"), node.get("type"),
+                                 scroll.images[part], ref if kind == "asset" else "")
                 continue
             paint = skia.Paint(AntiAlias=True)
             paint.setAlpha(round(255 * opacity))
@@ -890,6 +893,9 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
     group_paint = _group_paint(node)
     if group_paint is not None:
         canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
+        if group_paint.getAlpha() == 0:
+            # Nothing in a fully transparent group shows, so no image in it goes missing.
+            canvas.clipRect(skia.Rect.MakeEmpty())
 
     rotation = node.get("rotation")
     if rotation:
@@ -1066,6 +1072,9 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
     group_paint = _group_paint(node)
     if group_paint is not None:
         canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
+        if group_paint.getAlpha() == 0:
+            # Nothing in a fully transparent group shows, so no image in it goes missing.
+            canvas.clipRect(skia.Rect.MakeEmpty())
 
     # 5. Apply rotation around rect center
     rotation = node.get("rotation")
@@ -1475,6 +1484,10 @@ def render_json(
             canvas.clear(skia.Color(*bg_color))
         else:
             canvas.clear(skia.Color(*bg_color, 255))
+    elif recording_undrawn():
+        # Clips as the picture would, so an image out of sight isn't noted as missing.
+        surface, recorder = None, skia.PictureRecorder()
+        canvas = recorder.beginRecording(skia.Rect.MakeWH(width, height))
     else:
         surface, canvas = None, skia.MakeNullCanvas()
 

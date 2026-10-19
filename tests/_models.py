@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from PIL import Image
 
@@ -55,7 +56,7 @@ def token(value: int):
 
 
 def content(uri: str):
-    return ("Content", f"<url>{uri}</url>" if uri else "<null></null>")
+    return ("Content", f"<url>{escape(uri)}</url>" if uri else "<null></null>")
 
 
 def item(cls: str, name: str, props: dict | None = None, children=()) -> dict:

@@ -103,7 +103,7 @@ attribute leave findings out; stderr says how many and why.
 | `rhr.scene-dump/1` | `{source, bounds, parts, cameras, lights, beams, trails, terrain, lighting, sky, atmosphere, fallbacks, unsupportedVisualClasses, experimental, ...}` | keep, `experimental` included: it flags what is drawn with less checking (Atmosphere, post effects, local lights, decals; materials without Studio). The first draft of this review wrongly called it always empty. |
 | `rhr.compare/1` | snake_case keys | `rhr.compare/2`, camelCase |
 | `rhr.browser/1` | `{running}` | keep; add the browser used |
-| new: `rhr.render/1` | none | the `--json` report of `ui`, `scene`, `preview` (rule 2): `{command, source, out, size, notes}`, plus `screens` (`ui`, `preview`) and `camera {position, lookDirection, fieldOfView}`, `fallbacks`, `materialFallbacks`, `unsupportedVisualClasses`, `experimental`, `missingAssets` (`scene`, `preview`) |
+| new: `rhr.render/1` | none | the `--json` report of `ui`, `scene`, `preview` (rule 2): `{command, source, out, size, notes}`, plus `screens` (`ui`, `preview`) and `camera {position, lookDirection, fieldOfView}`, `fallbacks`, `materialFallbacks`, `unsupportedVisualClasses`, `experimental`, `missingAssets` (`ui`, `scene`, `preview`; a UI image's row adds `reason`, `rect`, and `hint` where RHR can say; `view` with `scene --views`) |
 | new: `rhr.render/1` `views` (Phase 3) | none | `scene --views`: `views: [{view, out, camera}]`; `out` and `camera` stay the first view's |
 | new: `rhr.batch/1` (Phase 3) | none | `rhr batch`: `{results: [{command, exitCode, stdout, stderr}]}`; `stdout` the parsed document when it is JSON, else the text |
 | `rhr.ir/1` | internal format | not contract |

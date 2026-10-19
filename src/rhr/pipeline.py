@@ -678,6 +678,7 @@ def render_gui_node(ir, node_path: str, width: int, height: int, out_path) -> tu
 
     from rhr.adapter import ir_node_to_raw
     from rhr.ir import resolve_path
+    from rhr.ui_engine.assets import ignore_undrawn
     from rhr.ui_engine.layout import Rect
 
     node = resolve_path(ir["roots"], node_path)
@@ -696,7 +697,9 @@ def render_gui_node(ir, node_path: str, width: int, height: int, out_path) -> tu
         obj = gui_object((0, 0, width, height))
         obj["_crop"] = True
         drawn: dict = {}
-        render_object(obj, None, width, height, (0, 0, 0, 0), draw=False, out=drawn)
+        # The drawing pass notes the missing images, at their places in the grown picture.
+        with ignore_undrawn():
+            render_object(obj, None, width, height, (0, 0, 0, 0), draw=False, out=drawn)
         rect = drawn.get("crop_rect")
         if rect is not None:
             left = max(0, math.ceil(-rect.x))
