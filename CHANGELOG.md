@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.0.0rc1+osabased.7 (fork)
+
+1.0.0rc1+osabased.6 with these fixes.
+
+### When upgrading
+
+- **`missingAssets` lists what the picture leaves out, and only that.** It was built
+  from the image ids the file uses, so it could list an image that drew, or one the
+  picture never shows (a HoverImage, a hidden image), as `offline`. Now an id that is
+  not cached says `not downloaded`, or `offline` with `--offline`. In `scene` and
+  `preview` it lists UI images too, after the 3D assets, each with a `reason`.
+- **`rhr check` reports every image the render leaves out as `image-missing`, graded by
+  whose gap it is.** An image Roblox refuses for good (shown as unavailable, no such
+  asset, not an image) is blank in Roblox too, and stays a warning. One only RHR's
+  render leaves out is info, below the default `--min-severity`: a file built into the
+  client, a thumbnail, a link RHR does not read, or a download that failed on RHR's
+  side (`no thumbnail`, which was a warning). An id not downloaded yet is not reported
+  (`rhr check` never downloads; `rhr ui` does). Before, `check` reported only images
+  whose download had failed, all as warnings.
+
+### Fixed
+
+- **Every image a render draws as nothing is in `missingAssets`, with why.** An
+  ImageLabel or ImageButton whose Image is a file built into the client
+  (`rbxasset://`), a `rbxthumb://` thumbnail or a link RHR does not read drew nothing,
+  and no report said so; Studio draws the first two (checked on 2026-10-18). Nor did
+  `scene` and `preview` list a BillboardGui's or SurfaceGui's images, or `preview` its
+  ScreenGuis'. The list now comes from the render: an image is listed where the picture
+  would show it and it has nothing to draw, plain, 9-slice, tiled or a scroll bar's.
+- **A UI image's row says where it would be and how to get it drawn.** `rect` is the
+  part of the screen it would cover, in screen pixels like the report's other rects
+  (`crop` and `scale` map them onto the PNG), so a review can mark where it belongs.
+  `hint`, where RHR can say, is how to get it drawn: `rhr fetch`, another image for one
+  Roblox shows as unavailable, `rbxassetid://` for a link RHR does not read. With
+  `scene --views`, `view` names the picture it is missing from. `rhr check`'s
+  `image-missing` findings say the same reason and hint.
+
 ## 1.0.0rc1+osabased.6 (fork)
 
 1.0.0rc1+osabased.5 with these fixes.
