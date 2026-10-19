@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0rc1+osabased.10 (fork)
+
+1.0.0rc1+osabased.9 with these fixes.
+
+### When upgrading
+
+- **Renders of a UIGradient off the axes, and of any gradient on text, change**, so
+  baselines made with earlier versions need remaking.
+
+### Fixed
+
+- **A UIGradient off the axes ramps as in Studio**, across the object's inscribed
+  ellipse along its Rotation, so its corners take the end colours. It ran 192 px at 45
+  degrees on a 172 x 100 Frame, where Studio's runs 140.5.
+- **A gradient on text runs at its own Rotation.** RHR turned it 10 degrees
+  counter-clockwise, so text at Rotation 0 ramped on a slant over 187 px, where Studio
+  ramps straight across the label's 172 px.
+
 ## 1.0.0rc1+osabased.9 (fork)
 
 1.0.0rc1+osabased.8 with these fixes.
