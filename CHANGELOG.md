@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.0rc1+osabased.12 (fork)
+
+1.0.0rc1+osabased.11 with these fixes.
+
+### When upgrading
+
+- **A Decal's, a Model's or a sound's id used as an image is no longer drawn**, as in
+  Roblox, so baselines that show one need remaking. The first render removes such
+  thumbnails from the cache.
+
+### Fixed
+
+- **An image whose download and thumbnail both fail says why the download did.** Each
+  said `no thumbnail`, so `rhr check` graded all of them as info. One Roblox refuses for
+  good (HTTP 404 or 409) is a warning now, and one RHR could not download says why (no
+  Studio login, no Lune, a failed connection).
+- **A download that failed on RHR's side is tried again on the next render.** A failed
+  connection, a rate limit or a server error was kept as `no thumbnail` and not asked
+  for again for a day. Now only Roblox's own refusals and files that are not what they
+  should be wait a day.
+- **An id that is not an Image draws as nothing, as in Roblox.** Roblox's thumbnail
+  service has a picture for a Decal's id (its image), a Model's (a render) and a
+  sound's (a speaker icon), and RHR drew it where Roblox draws nothing. Such an image is
+  listed in `missingAssets` and by `rhr check` (a warning) as `not an image`, with a
+  hint to use an Image's id.
+
 ## 1.0.0rc1+osabased.11 (fork)
 
 1.0.0rc1+osabased.10 with this fix.
