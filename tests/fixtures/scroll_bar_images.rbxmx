@@ -1,0 +1,22 @@
+<roblox version="4">
+  <Item class="ScreenGui" referent="S">
+    <Properties><string name="Name">ScrollBarImages</string></Properties>
+    <Item class="ScrollingFrame" referent="U">
+      <Properties><string name="Name">Unset</string></Properties>
+    </Item>
+    <Item class="ScrollingFrame" referent="E">
+      <Properties><string name="Name">Empty</string>
+        <Content name="TopImage"><null></null></Content>
+        <Content name="MidImage"><null></null></Content>
+        <Content name="BottomImage"><null></null></Content>
+      </Properties>
+    </Item>
+    <Item class="ScrollingFrame" referent="C">
+      <Properties><string name="Name">Custom</string>
+        <Content name="TopImage"><url>rbxasset://textures/DevConsole/Arrow.png</url></Content>
+        <Content name="MidImage"><url>rbxassetid://990000002</url></Content>
+        <Content name="BottomImage"><url>rbxthumb://type=Asset&amp;id=1&amp;w=150&amp;h=150</url></Content>
+      </Properties>
+    </Item>
+  </Item>
+</roblox>

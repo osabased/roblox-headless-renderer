@@ -36,7 +36,8 @@ local PROPS = {
   -- ScrollingFrame
   "CanvasSize", "CanvasPosition", "AutomaticCanvasSize", "ScrollBarThickness", "ScrollBarImageColor3",
   "ScrollBarImageTransparency", "ScrollingDirection", "ElasticBehavior", "VerticalScrollBarInset",
-  "HorizontalScrollBarInset", "ScrollBarFadeDelay", "SelectionImageObject",
+  "HorizontalScrollBarInset", "ScrollBarFadeDelay", "SelectionImageObject", "VerticalScrollBarPosition",
+  "TopImage", "MidImage", "BottomImage",
   -- CanvasGroup / layers
   "GroupTransparency", "GroupColor3",
   -- UI modifiers
@@ -194,6 +195,14 @@ end
 -- EmitCount / EmitDelay / EmitDuration convention); the scene reads them to show the
 -- effect mid-play without running the script.
 local ATTRIBUTE_CLASSES = { ParticleEmitter = true, Beam = true, Trail = true }
+
+-- An empty scroll bar image draws nothing, where an unset one draws Roblox's default
+-- bar: these keep an empty Content as "" instead of dropping it.
+local EMPTY_IS_A_VALUE = {
+  TopImage = true,
+  MidImage = true,
+  BottomImage = true,
+}
 
 -- JSON has no infinity; UISizeConstraint.MaxSize defaults to (inf, inf). Clamp to
 -- a large finite sentinel the adapter reads as "unbounded".
@@ -746,6 +755,9 @@ local function walk(inst)
     end
     if ok and value ~= nil then
       local c = conv(value)
+      if c == nil and typeof(value) == "Content" and EMPTY_IS_A_VALUE[name] then
+        c = ""
+      end
       if c ~= nil then
         props[name] = c
       elseif typeof(value) ~= "Content" then

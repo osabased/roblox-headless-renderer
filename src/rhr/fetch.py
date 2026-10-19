@@ -54,6 +54,7 @@ IMAGE_PROPERTIES = {
     "SkyboxBk", "SkyboxDn", "SkyboxFt", "SkyboxLf", "SkyboxRt", "SkyboxUp",
     "MoonTextureId", "SunTextureId", "ColorMap", "NormalMap", "RoughnessMap", "MetalnessMap",
     "ShirtTemplate", "PantsTemplate", "Graphic", "BaseTextureId", "OverlayTextureId",
+    "TopImage", "MidImage", "BottomImage",
 }
 MATERIAL_TABLE = PACKAGE / "scene" / "roblox_materials.json"
 FAILURES = CACHE / "cache" / "fetch_failures.json"
@@ -137,7 +138,7 @@ def image_uses(nodes) -> dict[str, list[dict]]:
     uses: dict[str, list[dict]] = {}
     for node in nodes:
         props = node.get("props") or {}
-        for key in ("Image", "HoverImage", "PressedImage"):
+        for key in ("Image", "HoverImage", "PressedImage", "TopImage", "MidImage", "BottomImage"):
             value = props.get(key)
             ref = asset_id(str(value)) if isinstance(value, (str, int)) and not isinstance(value, bool) else None
             if ref and node.get("path"):

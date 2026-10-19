@@ -22,7 +22,8 @@ PROPS = (
     'CanvasPosition', 'AutomaticCanvasSize', 'ScrollBarThickness', 'ScrollBarImageColor3',
     'ScrollBarImageTransparency', 'ScrollingDirection', 'ElasticBehavior',
     'VerticalScrollBarInset', 'HorizontalScrollBarInset', 'ScrollBarFadeDelay',
-    'SelectionImageObject', 'GroupTransparency', 'GroupColor3', 'CornerRadius',
+    'SelectionImageObject', 'VerticalScrollBarPosition', 'TopImage', 'MidImage', 'BottomImage',
+    'GroupTransparency', 'GroupColor3', 'CornerRadius',
     'TopLeftRadius', 'TopRightRadius', 'BottomLeftRadius', 'BottomRightRadius',
     'Thickness', 'Color', 'Transparency', 'ApplyStrokeMode', 'LineJoinMode',
     'StrokeSizingMode', 'BorderStrokePosition', 'Gradient', 'Offset', 'FillDirection',
@@ -130,3 +131,7 @@ VISUAL_XML_RECOVERY = frozenset(['BorderSizePixel', 'DisplayOrder', 'ClockTime',
 
 # Classes whose number and switch attributes the IR carries (effects played by script).
 ATTRIBUTE_CLASSES = frozenset(['ParticleEmitter', 'Beam', 'Trail'])
+
+# The names whose empty Content the IR keeps as "": an empty scroll bar image draws
+# nothing, where an unset one draws Roblox's default bar.
+EMPTY_IS_A_VALUE = frozenset(['TopImage', 'MidImage', 'BottomImage'])

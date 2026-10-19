@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""ScrollingFrame scale resolution: a child's Scale resolves against the WINDOW.
+"""ScrollingFrame scale resolution: a child's Scale resolves against the CANVAS.
 
-Roblox lays a ScrollingFrame's direct children out against the ScrollingFrame's
-absolute (window) size; CanvasSize only extends the scrollable range and the
-clip. Patch 0015 fixed the vendored renderer, which resolved Scale against the
-full canvas extent and pushed children (Trading's dark BackgroundFrame panels,
-CanvasSize yScale 3) far below the visible window. On the (since removed)
-real-game captures this fix moved Trading 85.74 -> 92.38 within8, EggRarity 92.69 -> 95.96.
+Studio lays a ScrollingFrame's children out on its canvas: CanvasSize, its Scale of
+the box the frame's own Size resolved against. Measured in Studio: a 130x170 frame
+with CanvasSize (0,0,3,0) and a 20 px bar, on a 401 px tall screen, has a 130x1203
+canvas, and its child sized (1,0,0.5,0) at (0,0,0.1,0) is 130x601.5 at canvas y
+120.3. Patch 0015 resolved Scale against the window, which those numbers rule out;
+tests/test_scroll_bars.py holds the other measured cases.
 
-Fixture: a ScrollingFrame (100x100 at 50,50 content coords, CanvasSize yScale 3)
-with one blue child Panel at yScale 0.06, height yScale 10.067. Before the fix
-the panel's top lands at content-y 0.06 * 300 (canvas height) = 18px too low and
-its extent explodes; after, Scale uses the window and the clip still bounds it.
+Fixture: a ScrollingFrame (100x100 at 50,50 in the content area, CanvasSize yScale 3,
+the default 12 px bar) with one blue child Panel at yScale 0.06, height yScale 10.067.
+The content area is 242 px tall at the 400x300 viewport, so the canvas is 726 tall:
+the panel starts 0.06 * 726 = 43.56 px down the frame, and the vertical bar shows,
+taking a 12 px strip off the window's right.
 
 Run: python tests/test_scroll_scale.py
 """
@@ -25,50 +26,65 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "tests"))
 
-from test_fixtures import _bbox, _render, rel  # noqa: E402
+from test_fixtures import _bbox, _render, content_origin, rel  # noqa: E402
 
 BLUE = (0, 0, 255)
 RED = (255, 0, 0)
+# Roblox's own bar: white at 128/255 opacity, over the frame's red.
+THUMB = (255, 128, 128)
 
 
-def check_panel_at_window_scale() -> str:
-    """Panel's yScale 0.06 resolves against the 100px window, not the 300px canvas."""
+def _at(img, x: int, y: int) -> tuple[int, ...]:
+    """The colour at a point of the fixture's content area."""
+    ox, oy = content_origin("scroll_scale")
+    return tuple(int(v) for v in img[y + oy, x + ox, :3])
+
+
+def _near(colour, want, tol: int = 8) -> bool:
+    return all(abs(a - b) <= tol for a, b in zip(colour, want))
+
+
+def check_panel_on_canvas() -> str:
+    """The panel's yScale 0.06 resolves against the 726 px canvas, not the 100 px window."""
     img = _render("scroll_scale")
     box = rel(_bbox(img, BLUE), "scroll_scale")
-    # Window origin y=58 (top bar), frame at content (50,50). Panel top =
-    # 0.06*100 = 6 inside the frame -> content y 56 (the origin is already
-    # subtracted by rel()). The panel is 10.067*100 = 1006 tall, clipped by
-    # the frame's bottom (content y 150): bbox bottom = 149.
-    expected = (50, 56, 149, 149)
+    # Top: content y 50 + 43.56, its first whole row 94. Right: the window ends where
+    # the bar's strip starts, x 138. Bottom: the panel is some 7300 px tall, clipped
+    # at the frame's bottom (content y 150).
+    expected = (50, 94, 137, 149)
     assert box == expected, f"panel bbox {box}, expected {expected}"
-    return f"panel bbox {box} (window-scale top 114, clipped at frame bottom)"
+    return f"panel bbox {box}"
 
 
-def check_frame_bg_visible() -> str:
-    """The ScrollingFrame's own red background still paints outside the panel."""
+def check_bar_strip() -> str:
+    """The bar's strip holds no content, and its bare track shows the frame's background."""
     img = _render("scroll_scale")
-    # The panel (top at content y 56, clipped at 150) covers the frame below
-    # y=56; red shows only in the 0.06*100 = 6px band above it. The frame bg's
-    # bbox is red-dominant there but PIL reports red only where it wins: 50..55.
-    box = rel(_bbox(img, RED), "scroll_scale")
-    expected = (50, 50, 149, 54)
-    assert box == expected, f"frame bg bbox {box}, expected {expected}"
-    return f"frame bg visible above the panel: {box}"
+    ox, oy = content_origin("scroll_scale")
+    strip = img[50 + oy:150 + oy, 138 + ox:150 + ox, :3]
+    blue = int((abs(strip - BLUE).max(axis=-1) <= 8).sum())
+    assert blue == 0, f"{blue} blue px in the bar's strip (content x 138..149)"
+    track = _at(img, 143, 100)
+    assert _near(track, RED), f"track below the thumb at (143,100): {track}, expected the frame's red"
+    return f"strip clear, track {track}"
 
 
-def check_canvas_does_not_escape_clip() -> str:
-    """Nothing paints outside the 100x100 window even though CanvasSize is 3x."""
+def check_default_thumb() -> str:
+    """The thumb: the window's share of the track, at least two thicknesses (24 px) long,
+    drawn from the middle of its top part to the middle of its bottom one."""
     img = _render("scroll_scale")
-    box = rel(_bbox(img, BLUE), "scroll_scale")
-    assert box[3] <= 207, f"panel leaks below the clip: bbox {box}"
-    assert box[0] >= 50 and box[2] <= 149, f"panel leaks sideways: bbox {box}"
-    return f"panel clipped to the window: {box}"
+    colour = _at(img, 144, 62)
+    assert _near(colour, THUMB), f"thumb at (144,62): {colour}, expected {THUMB}"
+    box = rel(_bbox(img, THUMB), "scroll_scale")
+    # The thumb spans content y 50..74; its bar is 6 px short at each end.
+    expected = (138, 56, 149, 67)
+    assert box == expected, f"thumb bbox {box}, expected {expected}"
+    return f"thumb {colour}, bbox {box}"
 
 
 CHECKS = [
-    ("scroll_scale: panel top at window yScale", check_panel_at_window_scale),
-    ("scroll_scale: frame background intact", check_frame_bg_visible),
-    ("scroll_scale: canvas stays inside the clip", check_canvas_does_not_escape_clip),
+    ("scroll_scale: panel top at canvas yScale", check_panel_on_canvas),
+    ("scroll_scale: the bar's strip is left to the bar", check_bar_strip),
+    ("scroll_scale: Roblox's default thumb", check_default_thumb),
 ]
 
 

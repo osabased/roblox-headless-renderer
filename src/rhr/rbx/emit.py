@@ -17,8 +17,8 @@ import math
 import numpy as np
 
 from rhr.rbx.binary import Document, Instance, V
-from rhr.rbx.props import (ATTRIBUTE_CLASSES, CONTENT_PROPERTY_ALIASES, GUI_CLASSES, PROPS, VISUAL_CLASSES,
-                           VISUAL_XML_RECOVERY)
+from rhr.rbx.props import (ATTRIBUTE_CLASSES, CONTENT_PROPERTY_ALIASES, EMPTY_IS_A_VALUE, GUI_CLASSES, PROPS,
+                           VISUAL_CLASSES, VISUAL_XML_RECOVERY)
 from rhr.rbx.reflection import Reflection, reflection
 
 PROPS_SET = frozenset(PROPS)
@@ -410,7 +410,7 @@ class Emitter:
                 return "prop", converted, ref_id
             if self.lua_typeof(value) != "Content":
                 return "unmapped", f"{name} ({self.lua_typeof(value)})", ref_id
-            return None, None, ref_id
+            return ("prop", "", ref_id) if name in EMPTY_IS_A_VALUE else (None, None, ref_id)
         if child_fallback:
             return "notprop", f"{name} (child {child_fallback})", ref_id
         if self.full or name in VISUAL_XML_RECOVERY:
@@ -421,11 +421,11 @@ class Emitter:
                 return "unreadable", name, ref_id
         return None, None, ref_id
 
-    def _direct_column(self, column, enum: str | None):
+    def _direct_column(self, column, enum: str | None, empty=_SKIP):
         """The IR values of a whole stored column, when every one of them goes the
         plain way (read, convert, keep): simple types Lune always hands over. Other
         columns (references, optional values, types that may fail) return None and are
-        resolved one value at a time."""
+        resolved one value at a time. An empty Content becomes `empty`."""
         raw = column.raw()
         if raw is None:
             return None
@@ -451,7 +451,7 @@ class Emitter:
         if kind == "BinaryString":
             return [v.decode("utf-8", errors="replace") for v in values]
         if kind == "Content":
-            return [v[1] if v is not None and v[0] == "uri" and v[1] != "" else _SKIP for v in values]
+            return [v[1] if v is not None and v[0] == "uri" and v[1] != "" else empty for v in values]
         if kind == "Vector3":
             return [{"X": _finite(x), "Y": _finite(y), "Z": _finite(z), "_t": "Vector3"} for x, y, z in values]
         if kind == "CFrame":
@@ -484,8 +484,9 @@ class Emitter:
         info = self.db.property_info(cls, name)
         if info is None:
             return None
+        empty = "" if name in EMPTY_IS_A_VALUE else _SKIP
         if name in columns:
-            return self._direct_column(columns[name], info.enum)
+            return self._direct_column(columns[name], info.enum, empty)
         # The name is not stored: its read is the same for every instance (a default,
         # nothing, or an error).
         try:
@@ -497,7 +498,7 @@ class Emitter:
         content_info = self.db.property_info(cls, content_name)
         if content_info is not None:
             if content_name in columns:
-                return self._direct_column(columns[content_name], content_info.enum)
+                return self._direct_column(columns[content_name], content_info.enum, empty)
             return None
         # Neither reads (the `...Content` name is not a property: without a child of
         # that name, an error): the XML fallback.

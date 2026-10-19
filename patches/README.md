@@ -55,6 +55,11 @@ uses smooth default sampling for ordinary image draws. The two-color fixture
 The empty-icon-root baseline is unchanged; assets.py is now included in the
 reconstruction file list.
 
+0015-scroll-scale-window.patch resolved a ScrollingFrame child's Scale against the
+frame's window. It no longer holds: Studio resolves it against the canvas
+(AbsoluteCanvasSize less the UIPadding, measured on 2026-10-18), and RHR's layout
+pass does too; tests/test_scroll_scale.py holds the cases.
+
 0010 also carries the overlapping plain/RTL TextScaled semantics hunks formerly
 in 0006. Patch 0007's offsets change with the deleted helper. Together the set
 reconstructs the vendor tree byte-for-byte. The corrected output has a separate

@@ -441,16 +441,14 @@ def _prepare_scene_assets(ir_path: Path, offline: bool, focus: str | None = None
 def _prepare_ui_images(ir_path: Path, offline: bool) -> list[dict]:
     """Before a UI render: download the images it uses that are not cached (rhr.fetch).
     Returns what is still missing, for the report: {path, class, uri, reason}."""
-    from rhr import fetch
+    from rhr import fetch, scrolling
     from rhr.adapter import ui_nodes
     from rhr.ir import load_ir
 
-    ir = load_ir(ir_path)
-    uses = fetch.image_uses(ui_nodes(ir))  # the UI's images, not the 3D world's
-    if not uses:
-        return []
+    nodes = list(ui_nodes(load_ir(ir_path)))  # the UI's images, not the 3D world's
+    uses = fetch.image_uses(nodes)
     statuses: dict[str, str] = {}
-    if not (offline or fetch.offline()):
+    if uses and not (offline or fetch.offline()):
         try:
             statuses = fetch.ensure({"images": set(uses)}, log=lambda message: print(message, file=sys.stderr))["images"]
         except Exception as exc:  # noqa: BLE001 - a failed download must not fail the render
@@ -462,6 +460,7 @@ def _prepare_ui_images(ir_path: Path, offline: bool) -> list[dict]:
         if status.startswith("missing"):
             reason = status.removeprefix("missing").strip(" ()") or "unavailable"
             missing += [{**use, "reason": reason} for use in uses[asset]]
+    missing += scrolling.missing_bar_images(nodes)
     if missing:
         shown = ", ".join(sorted({item["path"] for item in missing})[:4])
         print(f"note   {len(missing)} image(s) could not be had and draw as nothing: {shown}"

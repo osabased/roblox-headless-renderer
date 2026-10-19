@@ -7,7 +7,7 @@ import skia
 from .layout import Rect, resolve_rect, BASE_WIDTH, BASE_HEIGHT, layout_order_key
 from .visuals import draw_background, draw_stroke, make_gradient_shader, resolve_corner
 from .text import draw_text
-from .assets import load_icon, draw_image
+from .assets import DEFAULT_SAMPLING, load_icon, draw_image
 
 _debug_paint: skia.Paint | None = None
 
@@ -279,6 +279,11 @@ def _resolve_node_rect(node: dict, parent_rect: Rect, ctx: dict) -> Rect:
     )
 
 
+def _layout_scroll(node: dict, ctx: dict):
+    """A ScrollingFrame's scrolling from RHR's layout pass (ctx["_layout_scroll"]), or None."""
+    return (ctx.get("_layout_scroll") or {}).get(node.get("_path"))
+
+
 def _scrolling_frame_rects(node: dict, rect: Rect,
                            parent_rect: Rect | None = None) -> tuple[Rect, bool]:
     """Return (canvas_rect, force_clip) for a ScrollingFrame, or (rect, False) otherwise.
@@ -335,6 +340,59 @@ def _scrolling_frame_rects(node: dict, rect: Rect,
     canvas_px_y = max(0.0, min(1.0, _seq_num(canvas_pos, 1, 0.0))) * scroll_y
     canvas_rect = Rect(rect.x - canvas_px_x, rect.y - canvas_px_y, cw, ch)
     return canvas_rect, True
+
+
+def _draw_scroll_bars(canvas: skia.Canvas, node: dict, rect: Rect, scroll, icons_dir: Path | None) -> None:
+    """Draw a ScrollingFrame's bars (an rhr.scrolling.Scroll) inside the frame's corners."""
+    from rhr.scrolling import DEFAULT_ALPHA, classify
+
+    if not scroll.bars:
+        return
+    canvas.save()
+    corner_r = resolve_corner(node, rect.w, rect.h)
+    sk_rect = skia.Rect.MakeXYWH(rect.x, rect.y, rect.w, rect.h)
+    if corner_r > 0:
+        canvas.clipRRect(skia.RRect.MakeRectXY(sk_rect, corner_r, corner_r), True)
+    else:
+        canvas.clipRect(sk_rect)
+    r, g, b = scroll.colour
+    opacity = 1.0 - scroll.transparency
+    for bar in scroll.bars:
+        parts = bar.parts()
+        kinds = {part: classify(part, scroll.images[part]) for part, _ in parts}
+        defaults = [box for part, box in parts if kinds[part][0] == "default"]
+        if defaults:
+            # Roblox's own images join into one rounded bar; a part with a custom image
+            # takes its share of that bar away.
+            canvas.save()
+            shares = skia.Path()
+            for x, y, w, h in defaults:
+                shares.addRect(skia.Rect.MakeXYWH(x, y, w, h))
+            canvas.clipPath(shares, skia.ClipOp.kIntersect, True)
+            (x, y, w, h), radius = bar.pill()
+            paint = skia.Paint(AntiAlias=True)
+            paint.setColor(skia.Color(r, g, b, round(255 * DEFAULT_ALPHA * opacity)))
+            canvas.drawRRect(skia.RRect.MakeRectXY(skia.Rect.MakeXYWH(x, y, w, h), radius, radius), paint)
+            canvas.restore()
+        for part, (x, y, w, h) in parts:
+            kind, ref = kinds[part]
+            image = load_icon(ref, icons_dir) if kind == "asset" and icons_dir is not None else None
+            if image is None:
+                continue
+            paint = skia.Paint(AntiAlias=True)
+            paint.setAlpha(round(255 * opacity))
+            paint.setColorFilter(skia.ColorFilters.Blend(skia.Color(r, g, b, 255), skia.BlendMode.kModulate))
+            src = skia.Rect.MakeLTRB(0, 0, image.width(), image.height())
+            canvas.save()
+            if bar.vertical:
+                dst = skia.Rect.MakeXYWH(x, y, w, h)
+            else:
+                canvas.translate(x, y + h)
+                canvas.rotate(-90)
+                dst = skia.Rect.MakeXYWH(0, 0, h, w)
+            canvas.drawImageRect(image, src, dst, DEFAULT_SAMPLING, paint)
+            canvas.restore()
+    canvas.restore()
 
 
 def _resolve_padding(padding: dict, rect_w: float, rect_h: float) -> tuple[float, float, float, float]:
@@ -764,6 +822,11 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
         _push_crop_clip(ctx, rect)
         pushed_crop_clip = True
 
+    scroll = _layout_scroll(node, ctx)
+    if scroll is not None:
+        _annotate(canvas, f"Scroll bars: {name}")
+        _draw_scroll_bars(canvas, node, rect, scroll, ctx.get("icons_dir"))
+
     if is_text and node.get("text"):
         _annotate(canvas, f"Text: {name} — '{node.get('text', '')[:30]}'")
         draw_text(canvas, rect.x, rect.y, rect.w, rect.h, node, ctx.get("fonts_dir"),
@@ -779,15 +842,15 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
         draw_image(canvas, rect.x, rect.y, rect.w, rect.h, node, img,
                    gradient=node_gradient if is_image else None)
 
+    if scroll is not None:
+        canvas.clipRect(skia.Rect.MakeXYWH(*scroll.window))
+        _push_crop_clip(ctx, Rect(*scroll.window))
+
     # Recurse into children of this layout-placed node
     children = node.get("children", [])
     if children:
-        # ScrollingFrame: children are positioned within the canvas rect. The
-        # canvas ORIGIN carries the scroll offset, but a child's Scale resolves
-        # against the ScrollingFrame's WINDOW size (Roblox: scale is relative to
-        # AbsoluteSize; CanvasSize only extends the scrollable range).
-        child_parent = (Rect(canvas_rect.x, canvas_rect.y, rect.w, rect.h)
-                        if force_clip else rect)
+        # ScrollingFrame: children are positioned within the canvas rect
+        child_parent = canvas_rect if force_clip else rect
         visible_child_parent = rect
         pad_top, pad_bottom, pad_left, pad_right = _resolve_padding(
             node.get("padding", {}), child_parent.w, child_parent.h)
@@ -825,6 +888,8 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
             for child in children_draw:
                 render_node(canvas, child, inner, ctx)
 
+    if scroll is not None:
+        _pop_crop_clip(ctx)
     if pushed_crop_clip:
         _pop_crop_clip(ctx)
 
@@ -961,6 +1026,12 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
         _push_crop_clip(ctx, rect)
         pushed_crop_clip = True
 
+    scroll = _layout_scroll(node, ctx)
+    # A ScrollingFrame's bars draw in its own rect, outside the window its children see.
+    if scroll is not None:
+        _annotate(canvas, f"Scroll bars: {name}")
+        _draw_scroll_bars(canvas, node, rect, scroll, ctx.get("icons_dir"))
+
     # 9. Text rendering for text-based types
     if is_text and node.get("text"):
         _annotate(canvas, f"Text: {name} — '{node.get('text', '')[:30]}'")
@@ -978,15 +1049,15 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
         draw_image(canvas, rect.x, rect.y, rect.w, rect.h, node, img,
                    gradient=node_gradient if is_image else None)
 
+    if scroll is not None:
+        canvas.clipRect(skia.Rect.MakeXYWH(*scroll.window))
+        _push_crop_clip(ctx, Rect(*scroll.window))
+
     # 11-13. Render children with layout support
     children = node.get("children", [])
     if children:
-        # ScrollingFrame: children are positioned within the canvas rect. The
-        # canvas ORIGIN carries the scroll offset, but a child's Scale resolves
-        # against the ScrollingFrame's WINDOW size (Roblox: scale is relative to
-        # AbsoluteSize; CanvasSize only extends the scrollable range).
-        child_parent = (Rect(canvas_rect.x, canvas_rect.y, rect.w, rect.h)
-                        if force_clip else rect)
+        # ScrollingFrame: children are positioned within the canvas rect
+        child_parent = canvas_rect if force_clip else rect
         visible_child_parent = rect
         # Apply padding to content area
         pad_top, pad_bottom, pad_left, pad_right = _resolve_padding(
@@ -1030,6 +1101,8 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
             for child in children_draw:
                 render_node(canvas, child, content_rect, ctx)
 
+    if scroll is not None:
+        _pop_crop_clip(ctx)
     if pushed_crop_clip:
         _pop_crop_clip(ctx)
 
@@ -1082,6 +1155,7 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
 
     prev_crop_active = _begin_crop_tracking(ctx, node, rect)
     pushed_crop_clip = False
+    pushed_window = False
     try:
         # Build canvas ops: copy parent chain, then add this node's rotation + clip
         ops = list(parent_ops)
@@ -1121,18 +1195,19 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
                 ops.append(("clip_rect", rect.x, rect.y, rect.w, rect.h))
             _push_crop_clip(ctx, rect)
             pushed_crop_clip = True
+            scroll = _layout_scroll(node, ctx)
+            if scroll is not None:
+                ops.append(("clip_rect", *scroll.window))
+                _push_crop_clip(ctx, Rect(*scroll.window))
+                pushed_window = True
 
         # Recurse children
         children = node.get("children", [])
         if not children:
             return
 
-        # ScrollingFrame: children are positioned within the canvas rect. The
-        # canvas ORIGIN carries the scroll offset, but a child's Scale resolves
-        # against the ScrollingFrame's WINDOW size (Roblox: scale is relative to
-        # AbsoluteSize; CanvasSize only extends the scrollable range).
-        child_parent = (Rect(canvas_rect.x, canvas_rect.y, rect.w, rect.h)
-                        if force_clip else rect)
+        # ScrollingFrame: children are positioned within the canvas rect
+        child_parent = canvas_rect if force_clip else rect
         visible_child_parent = rect
         pad_top, pad_bottom, pad_left, pad_right = _resolve_padding(
             node.get("padding", {}), child_parent.w, child_parent.h)
@@ -1171,6 +1246,8 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
             for child in children:
                 _collect_entries(child, content_rect, ops, entries, ctx)
     finally:
+        if pushed_window:
+            _pop_crop_clip(ctx)
         if pushed_crop_clip:
             _pop_crop_clip(ctx)
         _end_crop_tracking(ctx, prev_crop_active)
@@ -1433,6 +1510,11 @@ def _draw_single_node(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict) ->
             _annotate(canvas, f"Stroke: {name} — thick={s.get('thickness', 1)}, pos={s.get('borderPosition', 'Outer')}")
             draw_stroke(canvas, rect.x, rect.y, rect.w, rect.h, node, s)
 
+    scroll = _layout_scroll(node, ctx)
+    if scroll is not None:
+        _annotate(canvas, f"Scroll bars: {name}")
+        _draw_scroll_bars(canvas, node, rect, scroll, ctx.get("icons_dir"))
+
     if is_text and node.get("text"):
         _annotate(canvas, f"Text: {name} — '{node.get('text', '')[:30]}'")
         draw_text(canvas, rect.x, rect.y, rect.w, rect.h, node, ctx.get("fonts_dir"),
@@ -1489,6 +1571,7 @@ def render_json(
     rect_map: dict | None = None,
     root_rect: Rect | None = None,
     layout_rects: dict | None = None,
+    layout_scroll: dict | None = None,
     draw: bool = True,
 ):
     """Render a complete PinevexObject to a PNG file.
@@ -1509,6 +1592,11 @@ def render_json(
     that size against the viewport. Defaults to the whole canvas. Callers that
     model a screen container pass the container's content area here (e.g. a
     ScreenGui's safe area), so descendants move with it.
+
+    *layout_rects* and *layout_scroll* come from RHR's layout pass, keyed by
+    ``_path``: the rect each node is drawn at, and each ScrollingFrame's window
+    and bars (an ``rhr.scrolling.Scroll``). Without *layout_scroll* no scroll
+    bars are drawn.
     """
     if draw:
         surface = skia.Surface(width, height)
@@ -1534,6 +1622,8 @@ def render_json(
         ctx["_rect_map"] = rect_map
     if layout_rects is not None:
         ctx["_layout_rects"] = layout_rects
+    if layout_scroll is not None:
+        ctx["_layout_scroll"] = layout_scroll
 
     requested_behavior = _normalize_z_index_behavior(z_index_behavior) or "Sibling"
     root_behavior = _normalize_z_index_behavior(obj.get("zIndexBehavior")) or requested_behavior

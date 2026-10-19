@@ -23,7 +23,7 @@ ItemLineAlignment), UIGridLayout (FillDirectionMaxCells, StartCorner, alignment)
 UITableLayout (with `FillEmptySpaceColumns`/`Rows`: the free space shared in
 proportion to the columns' and rows' own sizes), UIPageLayout (pages one container
 length plus Padding apart, the first page showing, as in Studio's edit view; no page
-animation), ScrollingFrame canvas and CanvasPosition.
+animation), ScrollingFrame canvas, CanvasPosition and scroll bars (below).
 
 Not yet measured against Studio: flex shrink with wrapping, ItemLineAlignment
 Stretch, and a UIPageLayout scrolled to another page than the first.
@@ -38,6 +38,39 @@ Studio's phone emulator on 2026-10-18): its `target` is a default ScreenGui's ar
 below the top bar and inside a phone's safe area, and `GuiService:GetGuiInset()`
 returns the top bar. The camera's `ViewportSize` is still the whole screen, where
 Studio's leaves out the notches.
+
+**ScrollingFrame.** Measured in Studio on 2026-10-18 (tests/test_scroll_scale.py and
+tests/test_scroll_bars.py hold the cases): within 1.5 px of Studio on every one.
+
+- A child's Scale resolves against the canvas (AbsoluteCanvasSize less the
+  UIPadding), not the frame. CanvasSize's own Scale resolves against the frame's
+  parent, as the frame's Size does.
+- A scroll bar shows on an axis ScrollingDirection allows when the canvas is longer
+  than the frame, less the other bar's strip when that one shows. Each bar takes a
+  ScrollBarThickness strip from the window: the children are clipped to the rest, and
+  the strip shows the frame's background. ScrollBarInset decides whether the canvas
+  leaves the strip out; VerticalScrollBarPosition Left puts the vertical bar on the
+  left. ScrollingEnabled false still draws the bars.
+- The thumb is the window's share of the track, at least two thicknesses long, placed
+  by CanvasPosition's share of the scroll range.
+- Roblox's own bar images (the defaults) cannot be shipped with RHR, so the bar they
+  make is drawn as a shape, measured to match: ScrollBarImageColor3 at half opacity,
+  with round ends. A custom TopImage, MidImage or BottomImage is drawn from its asset
+  id as Studio draws it: the top image over the thumb's first ScrollBarThickness, the
+  bottom one over its last, the middle one stretched between; a horizontal bar turns
+  each a quarter turn counter-clockwise. A bar image RHR cannot draw is left out, with
+  no stand-in: another file the Roblox client ships, a `rbxthumb://` thumbnail, or one
+  of Roblox's own bar images on a different part. `rhr ui --json` lists it in
+  `missingAssets`; `rhr check` reports `image-missing` only for an asset id Roblox
+  refused the last time RHR asked, as for any image.
+
+Not measured, and drawn by the rule RHR picked: UIPadding's Scale in a ScrollingFrame
+(against the frame, as everywhere else); AutomaticCanvasSize with Scale-sized children
+(their extent taken against the canvas before it grows); bars inside the frame's
+UICorner (clipped to it); ScrollBarThickness, CanvasSize and CanvasPosition under a
+UIScale (scaled like other pixel sizes); a track shorter than two thicknesses; content
+beside a left bar that is not inset (clipped to the window); a ScrollingFrame as a
+UITableLayout cell.
 
 **Several ScreenGuis** are drawn one per pass and stacked by `DisplayOrder`. A
 disabled or empty ScreenGui is skipped by every command. In a place file, only
@@ -90,7 +123,8 @@ the ones the file uses that are not cached, as the Roblox Studio user (the origi
 file, at full size); `--offline` skips that. Without a Studio login an image comes
 from Roblox's thumbnail service instead, at most 420 px, which puts sprite-sheet
 crops (`ImageRectOffset`, measured in the original's pixels) in the wrong place. A
-missing image leaves its area empty and is listed as a missing asset.
+missing image leaves its area empty and is listed as a missing asset. ScrollingFrame
+bar images have their own rules (ScrollingFrame, under UI layout).
 
 `ResampleMode` (Default = smooth, Pixelated = nearest) is honoured for Stretch, Fit
 and Crop. Tile and Slice filtering have not been checked.
@@ -321,6 +355,11 @@ Studio for every face.
 Approximate: a panel partly hidden behind geometry is drawn whole or not at all (one
 ray to its anchor decides). Canvases larger than 4096 px per side are clamped.
 `LightInfluence` and `Brightness` are not applied.
+
+A ScrollingFrame here is laid out by the engine alone, not by RHR's layout pass: it
+draws no scroll bars and leaves no room for them, and it reads CanvasPosition as a
+share of the scroll range, so one scrolled by a pixel or more shows the end of its
+canvas.
 
 ## ViewportFrame
 

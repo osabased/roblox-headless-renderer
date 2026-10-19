@@ -93,6 +93,8 @@ def shared_lists() -> None:
           "VISUAL_CLASSES matches")
     check(frozenset(re.findall(r"(\w+) = true", block("local VISUAL_XML_RECOVERY = {")))
           == props.VISUAL_XML_RECOVERY, "VISUAL_XML_RECOVERY matches")
+    check(frozenset(re.findall(r"(\w+) = true", block("local EMPTY_IS_A_VALUE = {"))) == props.EMPTY_IS_A_VALUE,
+          "EMPTY_IS_A_VALUE matches")
 
     from rhr.rbx.reflection import reflection
     from rhr.tools import TOOLS

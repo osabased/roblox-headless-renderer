@@ -23,14 +23,16 @@ Semantics, each pinned by a Studio fixture (tests/studio/ui_*.rbxlx):
   * UITableLayout: rows of cells, column widths and row heights from the largest cell;
     FillEmptySpaceColumns/Rows share the free space in proportion to those sizes.
   * UIPageLayout: pages one container length (+ Padding) apart, the first at the origin.
-  * ScrollingFrame: CanvasSize (+ AutomaticCanvasSize), CanvasPosition (clamped),
-    children's Scale against the window.
+  * ScrollingFrame: CanvasSize (+ AutomaticCanvasSize), CanvasPosition (clamped), the
+    scroll bars' strips (rhr.scrolling); children's Scale against the canvas.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+
+from rhr import scrolling
 
 GUI_OBJECT_CLASSES = {
     "Frame", "CanvasGroup", "ScrollingFrame", "TextLabel", "TextButton", "TextBox",
@@ -226,6 +228,7 @@ class UILayout:
         # Nodes an ancestor's layout already placed (UITableLayout cells): their own
         # parent's pass must not re-resolve them from Position/Size.
         self.placed_by_ancestor: set[str] = set()
+        self.scrolls: dict[str, scrolling.Scroll] = {}
 
     # A node's own rect, before its children are placed.
     def _resolve(self, node: dict, parent: Box, k: float, *, position: bool = True) -> Box:
@@ -275,44 +278,50 @@ class UILayout:
 
     def lay_out(self, node: dict, parent: Box, k: float = 1.0) -> Box:
         box = self._resolve(node, parent, k)
-        self._finish(node, box)
+        self._finish(node, box, parent)
         return box
 
-    def _finish(self, node: dict, box: Box) -> None:
-        """Record a placed node and lay out its children inside it."""
+    def _finish(self, node: dict, box: Box, reference: Box) -> None:
+        """Record a placed node and lay out its children inside it (`reference`: the box
+        its Size resolved against)."""
         self.boxes[node["path"]] = box
         left, top, right, bottom = _padding(node, box.w, box.h, box.scale)
-        content = Box(box.x + left, box.y + top, max(0.0, box.w - left - right),
-                      max(0.0, box.h - top - bottom), box.scale)
+        x, y, w, h = box.x, box.y, box.w, box.h
         if node.get("className") == "ScrollingFrame":
-            content = self._canvas(node, box, content)
+            scroll = self._scroll(node, box, reference)
+            self.scrolls[node["path"]] = scroll
+            (x, y), (w, h) = scroll.origin, scroll.canvas
+        content = Box(x + left, y + top, max(0.0, w - left - right), max(0.0, h - top - bottom), box.scale)
         self._place_children(node, content, box.scale)
 
-    def _canvas(self, node: dict, window: Box, content: Box) -> Box:
-        cxs, cxo, cys, cyo = _udim2(node, "CanvasSize")
-        canvas_w = cxs * window.w + cxo * window.scale
-        canvas_h = cys * window.h + cyo * window.scale
+    def _scroll(self, node: dict, box: Box, reference: Box) -> scrolling.Scroll:
+        # CanvasSize's Scale is of the box the frame's own Size resolved against: Studio
+        # makes (0, 0, 3, 0) in a 401 px tall parent 1203 px tall, whatever the frame's height.
+        xs, xo, ys, yo = _udim2(node, "CanvasSize", (0.0, 0.0, 2.0, 0.0))
+        own = _own_scale(node)
+        raw = (xs * reference.w * own + xo * box.scale, ys * reference.h * own + yo * box.scale)
+        frame = (box.x, box.y, box.w, box.h)
+        scroll = scrolling.solve(node, frame, box.scale, raw)
         automatic = _enum(node, "AutomaticCanvasSize", "None")
-        if automatic != "None":
-            probe = UILayout()
-            probe._place_children(node, Box(0.0, 0.0, content.w, content.h, window.scale), window.scale, measuring=True)
-            extent_w = extent_h = 0.0
-            for child in _gui_children(node):
-                child_box = probe.boxes.get(child["path"])
-                if child_box is not None and _visible(child):
-                    extent_w = max(extent_w, child_box.x + child_box.w)
-                    extent_h = max(extent_h, child_box.y + child_box.h)
-            left, top, right, bottom = _padding(node, window.w, window.h, window.scale)
-            if automatic in ("X", "XY"):
-                canvas_w = max(canvas_w, extent_w + left + right)
-            if automatic in ("Y", "XY"):
-                canvas_h = max(canvas_h, extent_h + top + bottom)
-        cx, cy = _vec2(node, "CanvasPosition")
-        cx = min(max(cx, 0.0), max(0.0, canvas_w - window.w))
-        cy = min(max(cy, 0.0), max(0.0, canvas_h - window.h))
-        # Children's Scale resolves against the window (patch 0015, Studio-measured);
-        # their origin is the scrolled canvas.
-        return Box(content.x - cx, content.y - cy, content.w, content.h, content.scale)
+        if automatic == "None":
+            return scroll
+        left, top, right, bottom = _padding(node, box.w, box.h, box.scale)
+        width, height = scroll.canvas
+        probe = UILayout()
+        probe._place_children(node, Box(0.0, 0.0, max(0.0, width - left - right), max(0.0, height - top - bottom),
+                                        box.scale), box.scale, measuring=True)
+        extent_w = extent_h = 0.0
+        for child in _gui_children(node):
+            child_box = probe.boxes.get(child["path"])
+            if child_box is not None and _visible(child):
+                extent_w = max(extent_w, child_box.x + child_box.w)
+                extent_h = max(extent_h, child_box.y + child_box.h)
+        raw_w, raw_h = raw
+        if automatic in ("X", "XY"):
+            raw_w = max(raw_w, extent_w + left + right)
+        if automatic in ("Y", "XY"):
+            raw_h = max(raw_h, extent_h + top + bottom)
+        return scrolling.solve(node, frame, box.scale, (raw_w, raw_h))
 
     def _place_children(self, node: dict, content: Box, k: float, measuring: bool = False) -> None:
         layout = _layout_object(node)
@@ -335,7 +344,7 @@ class UILayout:
         if measuring:
             return
         for child in children:
-            self._finish(child, self.boxes[child["path"]])
+            self._finish(child, self.boxes[child["path"]], content)
 
     # ------------------------------------------------------------ UIListLayout
 
@@ -596,11 +605,14 @@ def _align(mode: str, container: float, extent: float) -> float:
     return 0.0
 
 
-def lay_out_pane(root: dict, rect: tuple[float, float, float, float]) -> dict[str, Box]:
+def lay_out_pane(root: dict, rect: tuple[float, float, float, float],
+                 scrolls: dict[str, scrolling.Scroll] | None = None) -> dict[str, Box]:
     """Lay out one pane: a ScreenGui (or other canvas) node inside its content rect.
 
     `root` is a ScreenGui/SurfaceGui/BillboardGui whose GuiObject descendants are laid
     out inside `rect`, or a lone GuiObject laid out as if its parent were `rect`.
+    `scrolls`, when given, receives each ScrollingFrame's scrolling (rhr.scrolling.Scroll)
+    by path.
     """
     x, y, w, h = rect
     engine = UILayout()
@@ -609,6 +621,8 @@ def lay_out_pane(root: dict, rect: tuple[float, float, float, float]) -> dict[st
         engine.lay_out(root, canvas)
     else:
         engine._place_children(root, canvas, 1.0)
+    if scrolls is not None:
+        scrolls.update(engine.scrolls)
     return engine.boxes
 
 
@@ -634,7 +648,8 @@ def paint_entries(root: dict, rect: tuple[float, float, float, float]) -> list[t
     tree order) or Global (all objects by ZIndex, ties in tree order). Clipping comes
     from ClipsDescendants, ScrollingFrame windows and CanvasGroups.
     """
-    boxes = lay_out_pane(root, rect)
+    scrolls: dict[str, scrolling.Scroll] = {}
+    boxes = lay_out_pane(root, rect, scrolls)
     behavior = _enum(root, "ZIndexBehavior", "Sibling")
     ordered: list[tuple[float, int, dict, Box]] = []
     counter = [0]
@@ -651,6 +666,9 @@ def paint_entries(root: dict, rect: tuple[float, float, float, float]) -> list[t
         inner = clip
         if node.get("className") in CLIPPING_CLASSES or _bool(node, "ClipsDescendants", False):
             inner = _intersect(box, clip)
+        scroll = scrolls.get(node["path"])
+        if scroll is not None:
+            inner = _intersect(Box(*scroll.window), inner)
         children = _gui_children(node)
         if behavior != "Global":
             children = sorted(children, key=zindex)  # stable: ties keep tree order
