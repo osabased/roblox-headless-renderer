@@ -6,8 +6,6 @@ from typing import Any
 
 from .layout import BASE_HEIGHT, BASE_WIDTH
 
-_SUNBURST_ICON_KEY = "Custom/Sunburst"
-_SUNBURST_NAME_HINTS = ("sunbursteffect", "sunburst", "sunrays", "rays")
 _VIEWPORT_ABS_SIZE = (float(BASE_WIDTH), float(BASE_HEIGHT))
 _HARD_CODED_STUD_TEXTURE_KEYS = {
     "Textures/Hardcoded/GoldenStudsShelfButtonTexture.png",
@@ -179,12 +177,6 @@ def _set_image_key(node: dict[str, Any], icon_key: str) -> None:
     node["icon"] = icon_key
 
 
-def _normalized_text(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).lower()
-
-
 def _unwrap_font_token(value: str) -> tuple[str, bool]:
     text = str(value or "").strip()
     if text.startswith(_FONT_TOKEN_PREFIX) and text.endswith(_FONT_TOKEN_SUFFIX):
@@ -223,20 +215,6 @@ def _coerce_allowed_font(value: Any) -> str:
     if was_wrapped:
         return f"{_FONT_TOKEN_PREFIX}{canonical}{_FONT_TOKEN_SUFFIX}"
     return canonical
-
-
-def _has_sunburst_name_hint(value: Any) -> bool:
-    normalized = _normalized_text(value)
-    if not normalized:
-        return False
-    return any(hint in normalized for hint in _SUNBURST_NAME_HINTS)
-
-
-def _should_remap_to_sunburst(node: dict[str, Any]) -> bool:
-    class_name = str(node.get("type") or "")
-    if class_name != "ImageLabel":
-        return False
-    return _has_sunburst_name_hint(node.get("name"))
 
 
 def _rgb_triplet(value: Any) -> tuple[int, int, int] | None:
@@ -361,11 +339,6 @@ def _postprocess_node(node: dict[str, Any]) -> dict[str, Any]:
 
     if class_name == "ImageLabel" and "scaleType" not in node and _is_wrapped_icon_token(node.get("icon")):
         node["scaleType"] = "Fit"
-
-    if _should_remap_to_sunburst(node):
-        node["icon"] = _wrapped_icon_token(_SUNBURST_ICON_KEY)
-        if "scaleType" not in node:
-            node["scaleType"] = "Fit"
 
     grid = node.get("grid")
     if isinstance(grid, dict):
