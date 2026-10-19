@@ -97,6 +97,8 @@ def main() -> int:
               f"{screen}: target.AbsoluteSize is its size: {rect('Target/Bar')}")
         check(text("Target/Inset") == inset, f"{screen}: GetGuiInset: {text('Target/Inset')!r}")
         check(text("Target/Size") == camera, f"{screen}: CurrentCamera.ViewportSize: {text('Target/Size')!r}")
+        check(text("Target/Origin") == "0,0",
+              f"{screen}: target.AbsolutePosition is the area's corner: {text('Target/Origin')!r}")
 
     print("story: string requires, as pesde links packages")
     doc = layout("Tagged.story.luau")

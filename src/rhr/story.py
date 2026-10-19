@@ -12,19 +12,21 @@ all end in Instance.new and property sets.
 
 The story mounts where a game's own UI does in Play: in a default ScreenGui
 (CoreUISafeInsets), below the top bar and inside the device's insets, so
-`target.AbsoluteSize` is that area and `GuiService:GetGuiInset()` reads the top bar.
+`target.AbsoluteSize` is that area, its AbsolutePosition that area's corner (0, 0), and
+`GuiService:GetGuiInset()` reads the top bar.
 It reads the `--device`'s input and player settings as a Studio play-test on that
 device does (desktop without one): UserInputService.PreferredInput and the
 *Enabled flags, GuiService.ViewportDisplaySize, Roblox's default PreferredTextSize,
 PreferredTransparency and ReducedMotionEnabled, and a TopbarInset that is the whole
 top bar between the device's side insets (RHR draws none of Roblox's buttons there).
 
-What does not carry over: other sizes read while the story runs (AbsoluteSize,
-AbsolutePosition) are zero, since RHR lays the UI out afterwards; the camera's
-ViewportSize is the whole screen, where Studio leaves out a notch's side insets;
-TextService:GetTextBoundsAsync and GetTextSize are rough estimates; tweens end at
-their goal; the story's controls take their defaults; nothing is
-clicked.
+What does not carry over: RHR lays the UI out after the story ran, so what Roblox works
+out in layout reads as it does before layout (other elements' AbsoluteSize and
+AbsolutePosition, TextBounds, AbsoluteContentSize and the like are zero), except that
+TextFits and an image's IsLoaded read true; the camera's ViewportSize is the whole
+screen, where Studio leaves out a notch's side insets; TextService:GetTextBoundsAsync
+and GetTextSize are rough estimates; tweens end at their goal; the story's controls
+take their defaults; nothing is clicked.
 
 A story is run again only when something it runs on changed (the project's files,
 the screen, its insets and device, RHR's runtime): `check` then `ui` of the same story runs

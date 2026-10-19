@@ -620,3 +620,36 @@ Roblox answers these, but RHR still raises "not a valid member" because Lune can
 create an InputObject: `UserInputService:GetDeviceAcceleration`, `GetDeviceGravity`,
 `GetDeviceRotation` and `GetGamepadState`.
 
+**Story-time layout reads.** RHR lays the UI out after the story ran, so while it runs
+what Roblox works out in layout reads as Studio read it for a new element on
+2026-10-19, before layout: AbsoluteSize, AbsolutePosition and AbsoluteRotation zero;
+GuiState Idle; TextBounds zero and OpenTypeFeaturesError `""`; a TextBox's
+CursorPosition 1 and SelectionStart -1; a ScrollingFrame's AbsoluteCanvasSize and
+AbsoluteWindowSize, a layout's AbsoluteContentSize and a UIGridLayout's
+AbsoluteCellCount zero; a BillboardGui's CurrentDistance and DistanceStep 0; a
+VideoFrame's IsLoaded false, Resolution zero and TimeLength 0. TextFits and an
+ImageLabel's or ImageButton's IsLoaded read true, where Studio reads false until it
+has laid the text out or loaded the image, so code that shrinks text until it fits, or
+waits for an image, goes on. None of them changes while the story runs, and no change
+signal fires for them. The story's target and its ScreenGui have the area's size, and
+AbsolutePosition 0, 0: Roblox measures it from the area's corner. Studio works some
+of them out as soon as it can, even outside the game, where RHR reads zero: an
+element's AbsoluteSize once its Size is set in offsets; the AbsoluteSize of a
+ScreenGui or SurfaceGui the story makes, 800, 600 outside the game; a new
+UIGridLayout's AbsoluteCellSize, its CellSize of 100, 100; and a layout's
+AbsoluteContentSize in a ScreenGui that is not parented.
+
+Still errors in a story: `ContentText`, which Roblox works out as Text is set; a
+ViewportFrame's `CurrentCamera`, which Lune reads as Workspace's member (setting a
+Camera works); `Image`, `HoverImage`, `PressedImage`, a ScrollingFrame's `TopImage`,
+`MidImage` and `BottomImage`, `Video`, `CursorIcon`, `ActivatedCursorIcon`, a
+ScreenGui's `IgnoreGuiInset`, a UICorner's `CornerRadius` and `Font` until the story
+sets them, since Lune has no default for them; and the deprecated names
+`BackgroundColor`, `BorderColor`, `Transparency`, `TextColor`, `TextWrap`, `FontSize`,
+`Localize` and `LocalizedText`. Setting a deprecated name does not raise, but it does
+not reach the picture either (`TextWrap = true` leaves TextWrapped false): use
+`BackgroundColor3`, `BorderColor3`, `BackgroundTransparency`, `TextColor3`,
+`TextWrapped`, `TextSize` and `AutoLocalize`. Roblox's internal members
+(`ClippedRect`, `HasFocus`, `ScrollVelocity` and the like) raise as they do for a
+script in Roblox.
+

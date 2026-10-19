@@ -1,6 +1,7 @@
 -- Code that sizes itself from the screen: the target's size is the area a default
--- ScreenGui gets (below the top bar, inside the device's insets), GetGuiInset reads
--- the top bar, and the camera's ViewportSize is the viewport RHR draws at.
+-- ScreenGui gets (below the top bar, inside the device's insets) and its
+-- AbsolutePosition that area's corner, 0,0; GetGuiInset reads the top bar, and the
+-- camera's ViewportSize is the viewport RHR draws at.
 return function(target)
 	local screen = target.AbsoluteSize
 	local camera = workspace.CurrentCamera.ViewportSize
@@ -21,9 +22,16 @@ return function(target)
 	top.Size = UDim2.fromOffset(200, 30)
 	top.Text = `{inset.X},{inset.Y}`
 	top.Parent = target
+	local origin = Instance.new("TextLabel")
+	origin.Name = "Origin"
+	origin.Position = UDim2.fromOffset(0, 120)
+	origin.Size = UDim2.fromOffset(200, 30)
+	origin.Text = `{target.AbsolutePosition.X},{target.AbsolutePosition.Y}`
+	origin.Parent = target
 	return function()
 		bar:Destroy()
 		label:Destroy()
 		top:Destroy()
+		origin:Destroy()
 	end
 end

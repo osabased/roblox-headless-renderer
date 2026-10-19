@@ -352,14 +352,39 @@ roblox.implementMethod("HttpService", "JSONDecode", function(_, text)
 	return serde.decode("json", text)
 end)
 
--- Sizes RHR works out after the story ran: read as zero while it runs, not an error.
+-- What Roblox works out as it lays GUI out, which RHR does only after the story ran.
+-- Lune has no value for these, so a read would raise: they read as Studio's do on a new
+-- element, except that TextFits and an image's IsLoaded are true, so code that waits
+-- for them, or shrinks text until it fits, goes on, and a grid's AbsoluteCellSize is
+-- zero, where Studio's is the CellSize it starts with, which a story usually changes.
 local ZERO = roblox.Vector2.new(0, 0)
-local function presetSizes(instance)
-	if instance:IsA("GuiBase2d") then
-		pcall(function()
-			instance.AbsoluteSize = ZERO
-			instance.AbsolutePosition = ZERO
-		end)
+local TEXT = { TextBounds = ZERO, TextFits = true, OpenTypeFeaturesError = "" }
+local IMAGE = { IsLoaded = true }
+local COMPUTED = {
+	{ "GuiBase2d", { AbsoluteSize = ZERO, AbsolutePosition = ZERO, AbsoluteRotation = 0 } },
+	{ "GuiObject", { GuiState = roblox.Enum.GuiState.Idle } },
+	{ "TextLabel", TEXT },
+	{ "TextButton", TEXT },
+	{ "TextBox", TEXT },
+	{ "TextBox", { CursorPosition = 1, SelectionStart = -1 } },
+	{ "ImageLabel", IMAGE },
+	{ "ImageButton", IMAGE },
+	{ "VideoFrame", { IsLoaded = false, Resolution = ZERO, TimeLength = 0 } },
+	{ "ScrollingFrame", { AbsoluteCanvasSize = ZERO, AbsoluteWindowSize = ZERO } },
+	{ "BillboardGui", { CurrentDistance = 0, DistanceStep = 0 } },
+	{ "UIGridStyleLayout", { AbsoluteContentSize = ZERO } },
+	{ "UIGridLayout", { AbsoluteCellCount = ZERO, AbsoluteCellSize = ZERO } },
+}
+local function write(instance, property, value)
+	instance[property] = value
+end
+local function presetComputed(instance)
+	for _, preset in COMPUTED do
+		if instance:IsA(preset[1]) then
+			for property, value in preset[2] do
+				pcall(write, instance, property, value)
+			end
+		end
 	end
 end
 
@@ -380,7 +405,7 @@ if not ok then
 	fail("could not read the built project: " .. tostring(game))
 end
 for _, instance in game:GetDescendants() do
-	presetSizes(instance)
+	presetComputed(instance)
 end
 local workspace = game:GetService("Workspace")
 local camera = workspace.CurrentCamera or roblox.Instance.new("Camera")
@@ -509,7 +534,7 @@ base = {
 	Instance = {
 		new = function(className, parent)
 			local instance = roblox.Instance.new(className)
-			presetSizes(instance)
+			presetComputed(instance)
 			if instance:IsA("GuiButton") or instance:IsA("TextBox") then
 				instance.InputSink = roblox.Enum.InputSink.Activate
 			end
@@ -592,6 +617,9 @@ target.Name = "Target"
 target.Size = roblox.UDim2.fromScale(1, 1)
 target.BackgroundTransparency = 1
 target.Parent = screen
+presetComputed(screen)
+presetComputed(target)
+-- Roblox measures AbsolutePosition from the area's corner, so theirs stays 0,0.
 pcall(function()
 	screen.AbsoluteSize = areaSize
 	target.AbsoluteSize = areaSize
