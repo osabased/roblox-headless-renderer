@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0rc1+osabased.3 (fork)
+
+1.0.0rc1+osabased.2 with these fixes.
+
+### Fixed
+
+- **ScrollingFrames in a BillboardGui or SurfaceGui scroll as on screen.** In-world
+  UI was laid out by the 2D engine alone: a ScrollingFrame there drew no scroll bars,
+  left no room for them, and read CanvasPosition as a share of the scroll range, so
+  one scrolled by a pixel or more showed the end of its canvas. Studio scrolls them as
+  in a ScreenGui (measured on 2026-10-19). In-world UI now goes through RHR's layout
+  pass, as screen UI does and as `rhr hitmap` already did, so the picture and the
+  hitmap agree. Other objects move only where the engine's layout was wrong: it
+  ignored a UIGridLayout's FillDirectionMaxCells, for one.
+- **A BillboardGui that draws past its edges (ClipsDescendants off) is sized by what
+  it draws.** A UIStroke reaching past the edge was cut off, and a child that a
+  ScrollingFrame or a clipping frame hides made the picture larger.
+
 ## 1.0.0rc1+osabased.2 (fork)
 
 1.0.0rc1+osabased.1 with these fixes, measured against Studio on 2026-10-18.
