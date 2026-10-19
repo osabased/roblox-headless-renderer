@@ -117,20 +117,22 @@ def parse_background(text: str) -> tuple[int, int, int, int]:
     raise argparse.ArgumentTypeError(f"background must be RRGGBB or RRGGBBAA, got {text!r}")
 
 
-def ir_for(source: Path, *, profile: str = "full", viewport: tuple[int, int] = DEFAULT_VIEWPORT) -> Path:
+def ir_for(source: Path, *, profile: str = "full", viewport: tuple[int, int] = DEFAULT_VIEWPORT,
+           topbar_height: float | None = None) -> Path:
     """IR JSON for `source`: the file itself if it is IR, else the cached conversion
     (made again when the file changed).
 
     `source` may also be a Rojo project (a *.project.json file or a directory with
     default.project.json), which is built with `rojo build` first, or a story file
-    (*.story.luau), which is run at `viewport` and the UI it builds read (rhr.story).
+    (*.story.luau), which is run at `viewport` under a `topbar_height` top bar and the
+    UI it builds read (rhr.story).
     """
     from rhr.ir import cached_ir, load_ir
     from rhr import rojo, story
 
     if story.is_story(source):
         # UI that code builds: the story is run in its Rojo project (rhr.story).
-        source = story.build(source, width=viewport[0], height=viewport[1],
+        source = story.build(source, width=viewport[0], height=viewport[1], topbar_height=topbar_height,
                              log=lambda message: print(message, file=sys.stderr))
     project = rojo.project_file(source)
     if project is not None:
@@ -253,7 +255,7 @@ def _ui(args) -> int:
 
     t0 = time.perf_counter()
     try:
-        ir_path = ir_for(source, profile="ui", viewport=(width, height))
+        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
     except (ValueError, RuntimeError) as exc:
         return _die(str(exc))
     missing_images = _prepare_ui_images(ir_path, args.offline)
@@ -351,7 +353,7 @@ def _layout(args) -> int:
         return _die(f"no such file: {source}")
     width, height = args.viewport
     try:
-        ir_path = ir_for(source, profile="ui", viewport=(width, height))
+        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
         screens = load_screens(str(ir_path), width, height, args.topbar_height, required=True)
     except (ValueError, RuntimeError) as exc:
         return _die(str(exc))
@@ -521,10 +523,10 @@ def _check(args) -> int:
     t0 = time.perf_counter()
     try:
         baseline = load_baseline(Path(args.baseline)) if args.baseline else None
-        ir_path = ir_for(source, profile="ui", viewport=(width, height))
         if args.devices:
-            result = _check_devices(args, ir_path, baseline)
+            result = _check_devices(args, source, baseline)
         else:
+            ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
             result = check_model(ir_path, width, height, topbar_height=args.topbar_height,
                                  min_severity=args.min_severity, ignore=tuple(args.ignore), baseline=baseline)
     except (ValueError, RuntimeError, OSError) as exc:
@@ -556,9 +558,10 @@ def _check(args) -> int:
     return 1 if errors else 0
 
 
-def _check_devices(args, ir_path, baseline) -> dict:
+def _check_devices(args, source, baseline) -> dict:
     """`check --devices all|phone,tablet`: the checks on each screen, one document; a
-    finding seen on several screens is listed once, with them in `devices`."""
+    story is run on each screen, and a finding seen on several screens is listed once,
+    with them in `devices`."""
     from rhr import devices
     from rhr.checks import check_model
 
@@ -573,6 +576,7 @@ def _check_devices(args, ir_path, baseline) -> dict:
         for name in names:
             devices.CURRENT = devices.DEVICES[name]
             width, height = devices.CURRENT.viewport
+            ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
             result = check_model(ir_path, width, height, topbar_height=args.topbar_height,
                                  min_severity=args.min_severity, ignore=tuple(args.ignore), baseline=baseline)
             model = result["model"]
@@ -653,7 +657,7 @@ def _hitmap(args) -> int:
     width, height = args.viewport
     t0 = time.perf_counter()
     try:
-        ir_path = ir_for(source, profile="ui", viewport=(width, height))
+        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
         hitmap = build_hitmap(ir_path, width, height, topbar_height=args.topbar_height)
     except (ValueError, RuntimeError) as exc:
         return _die(str(exc))
@@ -885,7 +889,7 @@ def _preview(args) -> int:
     try:
         # A stored model (--focus) or stored ScreenGuis (--all-guis) need the storage read too.
         ir_path = ir_for(source, profile="static" if args.focus or args.all_guis else "world",
-                          viewport=(width, height))
+                          viewport=(width, height), topbar_height=args.topbar_height)
         from rhr.ir import world_ir
 
         world_path = world_ir(ir_path, args.focus)

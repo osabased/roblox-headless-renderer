@@ -1,6 +1,6 @@
 -- Run one UI story headlessly and save the UI it builds (rhr.story).
 --
---   lune run story-runtime.luau <built.rbxl|rbxm> <module path JSON> <out.rbxm> <width> <height> <name>
+--   lune run story-runtime.luau <built.rbxl|rbxm> <module path JSON> <out.rbxm> <width> <height> <name> <area JSON>
 --
 -- The built file is the Rojo project; the module path (a JSON list of names from the
 -- root) is the story's ModuleScript in it. Every UI library ends in the same calls
@@ -10,6 +10,9 @@
 -- loop that lets the UI settle. Story forms: function(target) (Hoarcekat, UI Labs);
 -- UI Labs tables with react/reactRoblox, roact, fusion, vide or a generic render;
 -- Flipbook's table.
+-- The area ({"insets": [left, top, right, bottom], "topbar": height}) is where a
+-- default ScreenGui sits on that screen, as a game's own UI does in Play. The
+-- story's ScreenGui is that size, and GetGuiInset reads the top bar.
 -- Scripts' own threads are left behind: the process exits once the UI is saved.
 local roblox = require("@lune/roblox")
 local fs = require("@lune/fs")
@@ -22,6 +25,11 @@ local task = require("@lune/task")
 local builtPath, modulePathJson, outPath = process.args[1], process.args[2], process.args[3]
 local viewport = roblox.Vector2.new(tonumber(process.args[4]) or 1615, tonumber(process.args[5]) or 1080)
 local storyName = process.args[6] or "Story"
+local area = serde.decode("json", process.args[7] or '{"insets": [0, 0, 0, 0], "topbar": 0}')
+local areaSize = roblox.Vector2.new(
+	viewport.X - area.insets[1] - area.insets[3],
+	viewport.Y - area.insets[2] - area.insets[4]
+)
 
 local function fail(message)
 	stdio.ewrite(tostring(message) .. "\n")
@@ -154,7 +162,7 @@ roblox.implementMethod("UserInputService", "GetMouseLocation", function()
 	return roblox.Vector2.new(0, 0)
 end)
 roblox.implementMethod("GuiService", "GetGuiInset", function()
-	return roblox.Vector2.new(0, 0), roblox.Vector2.new(0, 0)
+	return roblox.Vector2.new(0, area.topbar), roblox.Vector2.new(0, 0)
 end)
 roblox.implementMethod("Players", "GetPlayers", function(players)
 	return players:GetChildren()
@@ -395,7 +403,6 @@ end
 
 local screen = roblox.Instance.new("ScreenGui")
 screen.Name = storyName
-screen.IgnoreGuiInset = true
 screen.ResetOnSpawn = false
 screen.Parent = playerGui
 local target = roblox.Instance.new("Frame")
@@ -404,8 +411,8 @@ target.Size = roblox.UDim2.fromScale(1, 1)
 target.BackgroundTransparency = 1
 target.Parent = screen
 pcall(function()
-	screen.AbsoluteSize = viewport
-	target.AbsoluteSize = viewport
+	screen.AbsoluteSize = areaSize
+	target.AbsoluteSize = areaSize
 end)
 
 local runService = game:GetService("RunService")

@@ -33,7 +33,11 @@ Stretch, and a UIPageLayout scrolled to another page than the first.
 edit view has no top bar: pass `--topbar-height 0` to match it. `None` and
 `DeviceSafeInsets` use the whole viewport (a desktop has no notch).
 `TopbarSafeInsets` is not modelled; it falls back to `CoreUISafeInsets` with a
-note on stderr. Mobile safe areas are not modelled.
+note on stderr. A story's UI gets the area a game's own UI gets in Play (measured in
+Studio's phone emulator on 2026-10-18): its `target` is a default ScreenGui's area,
+below the top bar and inside a phone's safe area, and `GuiService:GetGuiInset()`
+returns the top bar. The camera's `ViewportSize` is still the whole screen, where
+Studio's leaves out the notches.
 
 **Several ScreenGuis** are drawn one per pass and stacked by `DisplayOrder`. A
 disabled or empty ScreenGui is skipped by every command. In a place file, only

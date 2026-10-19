@@ -55,7 +55,7 @@ def main() -> int:
     doc = layout("Badge.story.luau")
     if doc:
         rects = doc["rects"]
-        check(rects.get("Badge/Target/Badge") == {"x": 300.0, "y": 40.0, "w": 200.0, "h": 80.0},
+        check(rects.get("Badge/Target/Badge") == {"x": 300.0, "y": 98.0, "w": 200.0, "h": 80.0},
               f"a module's component, drawn where its tween ends: {rects.get('Badge/Target/Badge')}")
         check("Badge/Target/Claim" in rects, "an instance the story made itself")
         check(doc["viewport"] == [800, 600], "drawn at --viewport")
@@ -71,20 +71,37 @@ def main() -> int:
         check(title == "Settings", f"a plain control's default: {title!r}")
         check(doc["model"] == "Panel.story.json", f"documents name the story: {doc['model']!r}")
 
-    print("story: code that reads the screen size gets the viewport")
-    doc = layout("Viewport.story.luau", "--rich")
-    if doc:
-        nodes = {node["path"]: node for node in doc["nodes"]}
-        check(nodes.get("Viewport/Target/Bar", {}).get("rect", {}).get("w") == 400.0,
-              f"target.AbsoluteSize: {nodes.get('Viewport/Target/Bar', {}).get('rect')}")
-        size = nodes.get("Viewport/Target/Size", {}).get("text", {}).get("content")
-        check(size == "800x600", f"CurrentCamera.ViewportSize: {size!r}")
+    print("story: it mounts where a game's own UI does, below the top bar and inside the device's insets")
+    for screen, flags, area, camera, inset in (
+            ("800x600", ["--viewport", "800x600"], (0, 58, 800, 542), "800x600", "0,58"),
+            ("a 36 px top bar", ["--viewport", "800x600", "--topbar-height", "36"], (0, 36, 800, 564), "800x600",
+             "0,36"),
+            ("the phone", ["--device", "phone"], (59, 58, 734, 314), "852x393", "0,58")):
+        proc = run(["layout", str(STORIES / "Viewport.story.luau"), "--rich", *flags])
+        check(proc.returncode == 0, f"layout on {screen} exits 0 {proc.stderr[-400:] if proc.returncode else ''}")
+        if proc.returncode:
+            continue
+        nodes = {node["path"]: node for node in json.loads(proc.stdout)["nodes"]}
+
+        def rect(path: str) -> tuple | None:
+            box = nodes.get(f"Viewport/{path}", {}).get("rect")
+            return box and (box["x"], box["y"], box["w"], box["h"])
+
+        def text(path: str) -> str | None:
+            return nodes.get(f"Viewport/{path}", {}).get("text", {}).get("content")
+
+        x, y, w, h = area
+        check(rect("Target") == area, f"{screen}: the target fills that area: {rect('Target')}")
+        check(rect("Target/Bar") == (x, y, w // 2, h // 2),
+              f"{screen}: target.AbsoluteSize is its size: {rect('Target/Bar')}")
+        check(text("Target/Inset") == inset, f"{screen}: GetGuiInset: {text('Target/Inset')!r}")
+        check(text("Target/Size") == camera, f"{screen}: CurrentCamera.ViewportSize: {text('Target/Size')!r}")
 
     print("story: string requires, as pesde links packages")
     doc = layout("Tagged.story.luau")
     if doc:
         tag = doc["rects"].get("Tagged/Target/Tag")
-        check(tag == {"x": 10.0, "y": 20.0, "w": 120.0, "h": 28.0}, f"./, ../ and @self/ lead to the package: {tag}")
+        check(tag == {"x": 10.0, "y": 78.0, "w": 120.0, "h": 28.0}, f"./, ../ and @self/ lead to the package: {tag}")
     proc = run(["layout", str(STORIES / "Missing.story.luau")])
     check(proc.returncode == 2 and 'require("./NotThere")' in proc.stderr
           and re.search(r"at src[\\/]Missing\.story\.luau:2", proc.stderr) is not None,
@@ -114,6 +131,10 @@ def main() -> int:
     proc = run(["check", str(STORIES / "Panel.story.luau")])
     check(proc.returncode in (0, 1) and json.loads(proc.stdout or "{}").get("model") == "Panel.story.json",
           f"check names the story {proc.stderr[-300:] if proc.returncode > 1 else ''}")
+    proc = run(["check", str(STORIES / "Viewport.story.luau"), "--devices", "phone,desktop"])
+    runs = re.findall(r"^story  Viewport\.story\.luau: ", proc.stderr, re.M)
+    check(proc.returncode in (0, 1) and len(runs) == 2,
+          f"check --devices runs the story on each screen: {len(runs)} runs {'' if runs else proc.stderr[-300:]}")
     with tempfile.TemporaryDirectory(prefix="rhr-story-") as directory:
         out = Path(directory) / "badge.png"
         proc = run(["ui", str(STORIES / "Badge.story.luau"), "--viewport", "800x600", "--out", str(out)])
@@ -148,7 +169,7 @@ def main() -> int:
     print("story: in a project whose default.project.json wraps another")
     proc = run(["layout", str(WRAPPED / "Card.story.luau"), "--viewport", "800x600"])
     card = json.loads(proc.stdout)["rects"].get("Card/Target/Card") if proc.returncode == 0 else None
-    check(card == {"x": 40.0, "y": 40.0, "w": 160.0, "h": 90.0},
+    check(card == {"x": 40.0, "y": 98.0, "w": 160.0, "h": 90.0},
           f"runs in the place it wraps: {card} {proc.stderr.strip()[-300:] if proc.returncode else ''}")
 
     print("story: outside a Rojo project")

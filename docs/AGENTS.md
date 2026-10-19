@@ -97,11 +97,13 @@ nose); with `--focus <path>` the model's own front.
 
 A story is run in the Rojo project above it, with the project's modules (it needs
 `rojo`; RHR downloads it). It is the one input where RHR runs code: fine for your own
-project; do not run stories from untrusted pull requests outside a sandbox. Code that
-reads the screen size gets the viewport (`--viewport`, `--device`); other sizes read
-while the story runs are estimates; tweens end at their goal; controls take their
-defaults; nothing is clicked. A story that fails exits 2 with the error pointed at
-your files and lines.
+project; do not run stories from untrusted pull requests outside a sandbox. A story's
+`target` gets the area a game's own UI gets in Play: below the top bar and inside a
+phone's safe area, with `GuiService:GetGuiInset()` reading the top bar. Code that
+reads the camera's ViewportSize gets the whole screen (`--viewport`, `--device`),
+where Studio leaves out a phone's notches; other sizes read while the story runs are
+estimates; tweens end at their goal; controls take their defaults; nothing is
+clicked. A story that fails exits 2 with the error pointed at your files and lines.
 
 ## How far to trust the output
 

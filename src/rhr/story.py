@@ -10,13 +10,20 @@ instance or relative path), and saves the UI it built as a model file, which the
 command then reads like any other. Nothing about a UI library is special-cased: they
 all end in Instance.new and property sets.
 
-What does not carry over: sizes read while the story runs (AbsoluteSize,
-AbsolutePosition) are zero, since RHR lays the UI out afterwards; tweens end at their
-goal; the story's controls take their defaults; nothing is clicked.
+The story mounts where a game's own UI does in Play: in a default ScreenGui
+(CoreUISafeInsets), below the top bar and inside the device's insets, so
+`target.AbsoluteSize` is that area and `GuiService:GetGuiInset()` reads the top bar.
+
+What does not carry over: other sizes read while the story runs (AbsoluteSize,
+AbsolutePosition) are zero, since RHR lays the UI out afterwards; the camera's
+ViewportSize is the whole screen, where Studio leaves out a notch's side insets;
+tweens end at their goal; the story's controls take their defaults; nothing is
+clicked.
 
 A story is run again only when something it runs on changed (the project's files,
-the viewport, RHR's runtime): `check` then `ui` of the same story runs it once. A
-story that builds something different each run (random, the clock) keeps its first.
+the screen and its insets, RHR's runtime): `check` then `ui` of the same story runs
+it once. A story that builds something different each run (random, the clock) keeps
+its first.
 """
 
 from __future__ import annotations
@@ -130,9 +137,12 @@ def _tidy(text: str) -> str:
     return "\n".join(message + frames) or text
 
 
-def build(story: Path, *, width: int = 1920, height: int = 1080, log=None) -> Path:
-    """Run `story` and return the model file with the UI it built."""
-    from rhr import rojo
+def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: float | None = None,
+          log=None) -> Path:
+    """Run `story` on a `width` x `height` screen (the `--device` one's insets, a
+    `topbar_height` top bar, 58 by default) and return the model file with the UI it
+    built."""
+    from rhr import insets, rojo
     from rhr.ir import lune_executable
     from rhr.procs import no_window
 
@@ -140,15 +150,18 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, log=None) -> Pa
 
     project = find_project(story)
     name = story_name(story)
-    key = hashlib.sha1(str(story.resolve()).encode("utf-8")).hexdigest()[:12]
-    # One folder per story, the file named after it: documents name their source by
-    # this file's name ("model": "Shop.story.json").
+    topbar = insets.REFERENCE_TOPBAR_HEIGHT if topbar_height is None else float(topbar_height)
+    core = insets.resolve("CoreUISafeInsets", topbar)
+    area = json.dumps({"insets": [core.left, core.top, core.right, core.bottom], "topbar": topbar})
+    key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}".encode("utf-8")).hexdigest()[:12]
+    # One folder per story and screen, the file named after the story: documents name
+    # their source by this file's name ("model": "Shop.story.json").
     out = IR_DIR / "stories" / key / f"{name}.story.rbxm"
     out.parent.mkdir(parents=True, exist_ok=True)
     stamp = out.with_name(out.name + ".inputs")
     with phase("story: inputs check"):
         runtime = (PACKAGE / "luau" / "story-runtime.luau").stat()
-        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height,
+        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area,
                              runtime.st_size, runtime.st_mtime_ns, str(lune_executable())])
     try:
         kept = json.loads(stamp.read_text(encoding="utf-8"))
@@ -169,7 +182,7 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, log=None) -> Pa
     with phase("story: run (Lune)"):
         proc = subprocess.run(
             [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built), json.dumps(names),
-             str(out), str(width), str(height), name],
+             str(out), str(width), str(height), name, area],
             capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
             timeout=TIMEOUT_S, **no_window())
     problems = _tidy(_point_at_files(proc.stderr.strip(), files, project.parent))

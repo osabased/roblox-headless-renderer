@@ -165,8 +165,8 @@ libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2t64 libasound2t64 li
   drawn. `--show <path>` opens one, and `--only <path>` draws it alone.
 - **Place files.** Only StarterGui's screens are drawn; templates kept in
   ReplicatedStorage are listed, and `--all-guis` draws them too.
-- **The top bar.** UI is laid out below Roblox's 58 px top bar, as in a running game.
-  `--topbar-height 0` matches Studio's edit view.
+- **The top bar.** UI is laid out below Roblox's 58 px top bar, as in a running game,
+  and a story gets the same area. `--topbar-height 0` matches Studio's edit view.
 - **Stories run your code**, with your project's modules. That's fine for your own
   project; don't run stories from untrusted pull requests in CI outside a sandbox.
 - **Rojo projects that only map code** hold no UI; point `rhr` at the place file instead.
