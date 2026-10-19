@@ -590,3 +590,33 @@ What is painted beside the notches was measured later, in Play on 2026-10-18 (Ph
 notches, under UI layout). That emulator's iPhone 16 screen was 874x401, with 62 px
 notches and no home-bar inset; RHR applies the rule to each preset's own insets.
 
+**Story-time input and GUI reads** (`rhr layout` and the other story commands). A
+story reads a Studio play-test's values for the members UI code uses, which follow the
+preset where they differ: `console` has Gamepad1 connected
+(`GetConnectedGamepads`, `GetGamepadConnected`, `IsNavigationGamepad`,
+`GetNavigationGamepads`, a list of 18 `GetSupportedGamepadKeyCodes`) and
+`IsTenFootInterface` is true; the other presets have no gamepad and a false
+`IsTenFootInterface`. On every preset `TouchControlsEnabled` and the navigation flags
+start true, nothing is pressed or focused, the sensor and VR flags are false
+(Studio's phone emulator reads them false), and `IsWindows` is true (the host OS).
+`GetStringForKeyCode` gives a US keyboard's characters and
+`GetImageForKeyCode` the default controller's `rbxasset://` image for a gamepad
+button, `""` for any other key; both were read from Studio on 2026-10-19 in Edit
+mode, so a console's own controller art, and other keyboard layouts, are not modelled.
+Studio's `GetNavigationGamepads` lists all eight pads with none connected; RHR lists
+the connected ones. The gamepad buttons `ButtonCenter`, `ButtonBack` and the four
+`ButtonUp` to `ButtonRight` have images in Studio but are missing from Lune's
+KeyCode enum, so a story cannot name them.
+
+Still errors in a story, as these members do for a script in Roblox:
+`GuiService.DisplayScalingMode`, `SelectedCoreObject`, `ViewportSizeInMM`,
+`GetBrickCount`, `GetScreenResolution`, `GetSafeZoneOffsets`, `IsMemoryTrackerEnabled`;
+`UserInputService.BottomBarSize`, `NavBarSize`, `RightBarSize`, `StatusBarSize`,
+`LegacyInputEventsEnabled`, `OnScreenKeyboardAnimationDuration`,
+`OverrideMouseIconBehavior`, `TouchScreenEnabled` and `GetPlatform` (Roblox restricts
+them to its own scripts); `GuiService:GetClosestDockPart` and
+`UserInputService:GetUserCFrameEnabled` (no such members).
+Roblox answers these, but RHR still raises "not a valid member" because Lune cannot
+create an InputObject: `UserInputService:GetDeviceAcceleration`, `GetDeviceGravity`,
+`GetDeviceRotation` and `GetGamepadState`.
+

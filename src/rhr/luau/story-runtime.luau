@@ -164,6 +164,92 @@ end)
 roblox.implementMethod("GuiService", "GetGuiInset", function()
 	return roblox.Vector2.new(0, area.topbar), roblox.Vector2.new(0, 0)
 end)
+roblox.implementMethod("GuiService", "IsTenFootInterface", function()
+	return preferredInput == "Gamepad"
+end)
+roblox.implementMethod("GuiService", "GetEmotesMenuOpen", function()
+	return false
+end)
+roblox.implementMethod("GuiService", "GetInspectMenuEnabled", function()
+	return true
+end)
+
+-- The console preset has a gamepad connected, which the other presets lack.
+local function connectedGamepads()
+	return if preferredInput == "Gamepad" then { roblox.Enum.UserInputType.Gamepad1 } else {}
+end
+local function gamepadIsConnected(gamepad)
+	return table.find(connectedGamepads(), gamepad) ~= nil
+end
+roblox.implementMethod("UserInputService", "GetConnectedGamepads", connectedGamepads)
+roblox.implementMethod("UserInputService", "GetNavigationGamepads", connectedGamepads)
+roblox.implementMethod("UserInputService", "GetGamepadConnected", function(_, gamepad)
+	return gamepadIsConnected(gamepad)
+end)
+roblox.implementMethod("UserInputService", "IsNavigationGamepad", function(_, gamepad)
+	return gamepadIsConnected(gamepad)
+end)
+local GAMEPAD_KEYS =
+	{ "ButtonX", "ButtonY", "ButtonA", "ButtonB", "ButtonR1", "ButtonL1", "ButtonR2", "ButtonL2", "ButtonR3",
+		"ButtonL3", "ButtonStart", "ButtonSelect", "DPadLeft", "DPadRight", "DPadUp", "DPadDown", "Thumbstick1",
+		"Thumbstick2" }
+roblox.implementMethod("UserInputService", "GetSupportedGamepadKeyCodes", function(_, gamepad)
+	local keys = {}
+	if gamepadIsConnected(gamepad) then
+		for _, name in GAMEPAD_KEYS do
+			table.insert(keys, roblox.Enum.KeyCode[name])
+		end
+	end
+	return keys
+end)
+-- Nothing is held down and no pointer has moved while a story runs.
+for name, value in { IsKeyDown = false, IsMouseButtonPressed = false, IsGamepadButtonDown = false } do
+	roblox.implementMethod("UserInputService", name, function()
+		return value
+	end)
+end
+for _, name in { "GetKeysPressed", "GetMouseButtonsPressed" } do
+	roblox.implementMethod("UserInputService", name, function()
+		return {}
+	end)
+end
+roblox.implementMethod("UserInputService", "GetMouseDelta", function()
+	return roblox.Vector2.new(0, 0)
+end)
+roblox.implementMethod("UserInputService", "GetFocusedTextBox", function()
+	return nil
+end)
+roblox.implementMethod("UserInputService", "GetUserCFrame", function()
+	return roblox.CFrame.identity
+end)
+
+-- What GetStringForKeyCode gives on a US keyboard: the key's letter, or the character on
+-- the key without Shift. Keys with no printable character, and the Mouse and Touch
+-- codes, give "".
+local KEY_STRINGS = {
+	Space = " ", QuotedDouble = "'", Hash = "3", Dollar = "4", Percent = "5", Ampersand = "7", Quote = "'",
+	LeftParenthesis = "9", RightParenthesis = "0", Asterisk = "8", Plus = "=", Comma = ",", Minus = "-",
+	Period = ".", Slash = "/", Zero = "0", One = "1", Two = "2", Three = "3", Four = "4", Five = "5", Six = "6",
+	Seven = "7", Eight = "8", Nine = "9", Colon = ";", Semicolon = ";", LessThan = ",", Equals = "=",
+	GreaterThan = ".", Question = "/", At = "2", LeftBracket = "[", BackSlash = "\\", RightBracket = "]",
+	Caret = "6", Underscore = "-", Backquote = "`", LeftCurly = "[", Pipe = "\\", RightCurly = "]", Tilde = "`",
+	KeypadMinus = "-", KeypadPlus = "+", Print = "*",
+}
+local IMAGE_BASE = "rbxasset://textures/ui/Controls/DefaultController/"
+roblox.implementMethod("UserInputService", "GetStringForKeyCode", function(_, key)
+	local name = key.Name
+	if string.match(name, "^%u$") or table.find(GAMEPAD_KEYS, name) then
+		return name
+	end
+	return KEY_STRINGS[name] or ""
+end)
+roblox.implementMethod("UserInputService", "GetImageForKeyCode", function(_, key)
+	local name = key.Name
+	if table.find(GAMEPAD_KEYS, name) then
+		return `{IMAGE_BASE}{name}@2x.png`
+	end
+	return ""
+end)
 local function shownWithin(object, root)
 	while object ~= root do
 		if object:IsA("GuiObject") and not object.Visible then
@@ -298,6 +384,29 @@ guiService.ReducedMotionEnabled = false
 -- RHR draws none of Roblox's top-bar buttons, so the whole bar between the device's
 -- side insets is free.
 guiService.TopbarInset = roblox.Rect.new(area.insets[1], 0, viewport.X - area.insets[3], area.topbar)
+
+-- Lune's reflection data has no default for these, so reading one that was never set is an
+-- error. They start at what a Studio play-test reads.
+guiService.AutoSelectGuiEnabled = true
+guiService.CoreGuiNavigationEnabled = true
+guiService.GuiNavigationEnabled = true
+guiService.IsModalDialog = false
+guiService.IsWindows = true
+guiService.MenuIsOpen = false
+guiService.TouchControlsEnabled = true
+userInput.AccelerometerEnabled = false
+userInput.GyroscopeEnabled = false
+userInput.ModalEnabled = false
+userInput.VREnabled = false
+userInput.MouseBehavior = roblox.Enum.MouseBehavior.Default
+userInput.MouseDeltaSensitivity = 1
+userInput.MouseIcon = ""
+userInput.MouseIconContent = roblox.Content.none
+userInput.MouseIconEnabled = true
+userInput.OnScreenKeyboardPosition = roblox.Vector2.new(0, 0)
+userInput.OnScreenKeyboardSize = roblox.Vector2.new(0, 0)
+userInput.OnScreenKeyboardVisible = false
+userInput.UserHeadCFrame = roblox.CFrame.identity
 local players = game:GetService("Players")
 local localPlayer = players:FindFirstChildOfClass("Player") or roblox.Instance.new("Player")
 localPlayer.Name = if localPlayer.Name == "Player" or localPlayer.Name == "" then "Player" else localPlayer.Name
