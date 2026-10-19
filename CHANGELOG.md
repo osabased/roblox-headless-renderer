@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.0rc1+osabased.4 (fork)
+
+1.0.0rc1+osabased.3 with these fixes, measured against Studio on 2026-10-19.
+
+### When upgrading
+
+- **A `Global` gui is drawn as `Global`.** That is the default for a new ScreenGui,
+  BillboardGui or SurfaceGui, and the ScreenGui a story is mounted in. Its picture
+  changes wherever its ZIndex order is not its tree order, and a CanvasGroup in it no
+  longer fades, tints or clips its children.
+
+### Fixed
+
+- **ZIndexBehavior is followed in drawing.** Every gui was drawn as `Sibling`, so in a
+  `Global` one the picture and `rhr hitmap` could disagree about which object is on
+  top. `Global` now stacks every object in the gui by ZIndex, ties in tree order, as
+  the hit map already did, and a ClipsDescendants frame or a ScrollingFrame still
+  clips its descendants wherever they land in the order.
+- **Under `Global` a CanvasGroup is not composited**, as in Studio: GroupTransparency
+  and GroupColor3 fade and tint its own background only, and it does not clip its
+  descendants' drawing (their hit regions are still clipped to its rect).
+- **UIListLayout and UIGridLayout items stack by ZIndex, ties in child order**, under
+  either behavior, as in Studio. They were drawn in LayoutOrder whatever their ZIndex,
+  so where items overlap (negative padding) the wrong one could be on top. The hit map
+  already stacked them this way.
+
 ## 1.0.0rc1+osabased.3 (fork)
 
 1.0.0rc1+osabased.2 with these fixes.
