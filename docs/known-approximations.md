@@ -39,6 +39,36 @@ below the top bar and inside a phone's safe area, and `GuiService:GetGuiInset()`
 returns the top bar. The camera's `ViewportSize` is still the whole screen, where
 Studio's leaves out the notches.
 
+**Phone notches** (`--device phone`, `--device android`). Measured in Studio's iPhone
+16 emulator in Play on 2026-10-18; tests/test_notch_fill.py rebuilds each case. Two
+ScreenGui properties decide what is painted beside the notches. Neither moves
+anything, and under `ScreenInsets = None` neither applies.
+
+- `SafeAreaCompatibility` (FullscreenExtension, the default): an object whose rect,
+  with its outline (BorderSizePixel) and a Border UIStroke, covers the device safe
+  area on both axes paints out to the screen edges. Its background, outline and
+  stroke reach the screen edges, its image stretches to fill, a UICorner rounds the
+  new corners, and a ClipsDescendants clip stretches with it. Its AbsolutePosition,
+  AbsoluteSize and children's layout stay as they were. The safe area runs up behind
+  the top bar, so in a default ScreenGui only an object that reaches up there
+  stretches: a full-size Frame stays between the notches. An object that covers the
+  safe area on one axis only does not stretch.
+- `ClipToDeviceSafeArea` (on by default) clips everything that does not stretch to
+  the safe area, a stretched object's children included. Roblox's docs say it clips
+  every descendant; in Studio a stretched object is not clipped.
+
+Not measured, and drawn by the rule RHR picked: `SafeAreaCompatibility = None`
+(nothing stretches, as Roblox documents it); the phones' 21 px home-bar inset (treated
+like a notch: stretched over, and clipped above); the corner pixels of a stretched
+UIStroke; an outline that is not drawn (under a UICorner, or with a transparent
+background), which does not count; a Contextual UIStroke on a Frame, which counts like
+a Border one. In a stretched object, what is sized by the object follows the
+stretched rect (UICorner, a UIStroke's Scale thickness, UIGradient, ImageLabel
+ScaleType, a CanvasGroup), while its text, scroll bars and a ViewportFrame's 3D view
+keep its own rect and are not clipped to the safe area. A rotated object is tested by
+its unrotated rect, and the clip is in screen space. Clicks (`rhr hitmap`) use the
+object's own rect.
+
 **ScrollingFrame.** Measured in Studio on 2026-10-18 (tests/test_scroll_scale.py and
 tests/test_scroll_bars.py hold the cases): within 1.5 px of Studio on every one.
 
@@ -500,4 +530,8 @@ sides (iPhone 16: 59 px; Galaxy A16: 47 px) and a 21 px home bar. Not modelled:
 portrait, the on-screen keyboard, console "title safe" margins, the thumbstick's
 exact dead zones (the check uses the frame Roblox reserves for it), and changes to
 Roblox's touch controls after that date.
+
+What is painted beside the notches was measured later, in Play on 2026-10-18 (Phone
+notches, under UI layout). That emulator's iPhone 16 screen was 874x401, with 62 px
+notches and no home-bar inset; RHR applies the rule to each preset's own insets.
 

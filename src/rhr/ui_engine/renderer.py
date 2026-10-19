@@ -1,4 +1,5 @@
 """Main orchestrator: recursively render a PinevexObject tree to a PNG via skia."""
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -282,6 +283,64 @@ def _resolve_node_rect(node: dict, parent_rect: Rect, ctx: dict) -> Rect:
 def _layout_scroll(node: dict, ctx: dict):
     """A ScrollingFrame's scrolling from RHR's layout pass (ctx["_layout_scroll"]), or None."""
     return (ctx.get("_layout_scroll") or {}).get(node.get("_path"))
+
+
+def _outline_size(node: dict, rect: Rect) -> float:
+    """How far the legacy border draws outside the rect, as draw_background draws it."""
+    border = node.get("legacyBorder")
+    if not border or node.get("bg") is None or _num(node.get("bgTransparency", 0), 0.0) >= 1:
+        return 0.0
+    if resolve_corner(node, rect.w, rect.h) > 0:
+        return 0.0
+    return float(max(0, int(border.get("size", 0))))
+
+
+def _stretched_rect(node: dict, rect: Rect, ctx: dict) -> Rect | None:
+    """The rect a FullscreenExtension object paints at (ctx["_safe_area"]), or None.
+
+    An object qualifies when its total rect (the rect plus its drawn outline and
+    stroke) covers the device safe area on both axes. It then paints as if its rect
+    reached as far past each edge as the screen does past its total rect, so what it
+    draws covers the screen.
+    """
+    area = ctx.get("_safe_area")
+    if area is None or not area.extend:
+        return None
+    grow = max(_outline_size(node, rect), _crop_stroke_bleed(node, rect))
+    left, top = rect.x - grow, rect.y - grow
+    right, bottom = rect.x + rect.w + grow, rect.y + rect.h + grow
+    sx, sy, sw, sh = area.safe
+    covers = (left <= sx + 1e-6 and top <= sy + 1e-6
+              and right >= sx + sw - 1e-6 and bottom >= sy + sh - 1e-6)
+    if not covers:
+        return None
+    x, y, w, h = area.screen
+    dl, dt = max(0.0, left - x), max(0.0, top - y)
+    dr, db = max(0.0, x + w - right), max(0.0, y + h - bottom)
+    return Rect(rect.x - dl, rect.y - dt, rect.w + dl + dr, rect.h + dt + db)
+
+
+def _safe_clip(ctx: dict) -> skia.Rect | None:
+    """The device safe area that objects which don't stretch are clipped to, or None."""
+    area = ctx.get("_safe_area")
+    return skia.Rect.MakeXYWH(*area.safe) if area is not None and area.clip else None
+
+
+@contextmanager
+def _clipped(canvas: skia.Canvas, clip: skia.Rect | None):
+    """Draw inside a clip given in screen pixels, whatever the canvas is rotated by."""
+    if clip is None:
+        yield
+        return
+    canvas.save()
+    matrix = canvas.getTotalMatrix()
+    canvas.resetMatrix()
+    canvas.clipRect(clip)
+    canvas.setMatrix(matrix)
+    try:
+        yield
+    finally:
+        canvas.restore()
 
 
 def _scrolling_frame_rects(node: dict, rect: Rect,
@@ -764,7 +823,13 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
     if "_rect_map" in ctx and "_path" in node:
         ctx["_rect_map"][node["_path"]] = rect
 
-    prev_crop_active = _begin_crop_tracking(ctx, node, rect)
+    # A FullscreenExtension object paints at `box`, out to the screen edges; its
+    # text, scroll bars and children keep its own rect.
+    stretched = _stretched_rect(node, rect, ctx)
+    box = stretched or rect
+    safe_clip = None if stretched else _safe_clip(ctx)
+
+    prev_crop_active = _begin_crop_tracking(ctx, node, box)
 
     name = node.get("_debug_path") or node.get("name") or node.get("type", "?")
 
@@ -780,7 +845,7 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
             if group_color != [255, 255, 255]:
                 group_paint.setColorFilter(skia.ColorFilters.Blend(
                     skia.Color(*group_color, 255), skia.BlendMode.kModulate))
-            canvas.saveLayer(skia.Rect.MakeXYWH(rect.x, rect.y, rect.w, rect.h), group_paint)
+            canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
             group_layer = True
 
     rotation = node.get("rotation")
@@ -799,48 +864,51 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
     has_canvas_group_gradient = node_type == "CanvasGroup" and gradient is not None
     if has_canvas_group_gradient:
         _annotate(canvas, f"CanvasGroup layer: {name}")
-        canvas.saveLayer(skia.Rect.MakeXYWH(rect.x, rect.y, rect.w, rect.h))
+        canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h))
     node_gradient = None if has_canvas_group_gradient else gradient
-    _annotate(canvas, f"BG: {name}")
-    draw_background(canvas, rect.x, rect.y, rect.w, rect.h, node, gradient=node_gradient)
+    with _clipped(canvas, safe_clip):
+        _annotate(canvas, f"BG: {name}")
+        draw_background(canvas, box.x, box.y, box.w, box.h, node, gradient=node_gradient)
 
     # Border strokes
-    for s in _sort_strokes(node.get("strokes", [])):
-        if not is_text or s.get("applyMode") == "Border":
-            _annotate(canvas, f"Stroke: {name} — thick={s.get('thickness', 1)}, pos={s.get('borderPosition', 'Outer')}")
-            draw_stroke(canvas, rect.x, rect.y, rect.w, rect.h, node, s)
+    with _clipped(canvas, safe_clip):
+        for s in _sort_strokes(node.get("strokes", [])):
+            if not is_text or s.get("applyMode") == "Border":
+                _annotate(canvas, f"Stroke: {name} — thick={s.get('thickness', 1)}, pos={s.get('borderPosition', 'Outer')}")
+                draw_stroke(canvas, box.x, box.y, box.w, box.h, node, s)
 
     # Clip AFTER strokes so Outer strokes aren't clipped by own clipsDescendants
     pushed_crop_clip = False
     if force_clip or node.get("clipsDescendants"):
-        corner_r = resolve_corner(node, rect.w, rect.h)
-        sk_rect = skia.Rect.MakeXYWH(rect.x, rect.y, rect.w, rect.h)
+        corner_r = resolve_corner(node, box.w, box.h)
+        sk_rect = skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h)
         if corner_r > 0:
             canvas.clipRRect(skia.RRect.MakeRectXY(sk_rect, corner_r, corner_r))
         else:
             canvas.clipRect(sk_rect)
-        _push_crop_clip(ctx, rect)
+        _push_crop_clip(ctx, box)
         pushed_crop_clip = True
 
     scroll = _layout_scroll(node, ctx)
-    if scroll is not None:
-        _annotate(canvas, f"Scroll bars: {name}")
-        _draw_scroll_bars(canvas, node, rect, scroll, ctx.get("icons_dir"))
+    with _clipped(canvas, safe_clip):
+        if scroll is not None:
+            _annotate(canvas, f"Scroll bars: {name}")
+            _draw_scroll_bars(canvas, node, rect, scroll, ctx.get("icons_dir"))
 
-    if is_text and node.get("text"):
-        _annotate(canvas, f"Text: {name} — '{node.get('text', '')[:30]}'")
-        draw_text(canvas, rect.x, rect.y, rect.w, rect.h, node, ctx.get("fonts_dir"),
-                  gradient=node_gradient if is_text else None)
+        if is_text and node.get("text"):
+            _annotate(canvas, f"Text: {name} — '{node.get('text', '')[:30]}'")
+            draw_text(canvas, rect.x, rect.y, rect.w, rect.h, node, ctx.get("fonts_dir"),
+                      gradient=node_gradient if is_text else None)
 
-    if is_image or node.get("icon"):
-        img = None
-        icon_key = node.get("icon", "")
-        icons_dir = ctx.get("icons_dir")
-        if icon_key and icons_dir:
-            img = load_icon(icon_key, icons_dir)
-        _annotate(canvas, f"Image: {name} — {icon_key}")
-        draw_image(canvas, rect.x, rect.y, rect.w, rect.h, node, img,
-                   gradient=node_gradient if is_image else None)
+        if is_image or node.get("icon"):
+            img = None
+            icon_key = node.get("icon", "")
+            icons_dir = ctx.get("icons_dir")
+            if icon_key and icons_dir:
+                img = load_icon(icon_key, icons_dir)
+            _annotate(canvas, f"Image: {name} — {icon_key}")
+            draw_image(canvas, box.x, box.y, box.w, box.h, node, img,
+                       gradient=node_gradient if is_image else None)
 
     if scroll is not None:
         canvas.clipRect(skia.Rect.MakeXYWH(*scroll.window))
@@ -895,7 +963,7 @@ def _render_node_at(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
 
     if has_canvas_group_gradient:
         _annotate(canvas, f"CanvasGroup gradient: {name}")
-        _draw_canvas_group_gradient(canvas, rect, gradient)
+        _draw_canvas_group_gradient(canvas, box, gradient)
         canvas.restore()
 
     if group_layer:
@@ -964,7 +1032,13 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
     if "_rect_map" in ctx and "_path" in node:
         ctx["_rect_map"][node["_path"]] = rect
 
-    prev_crop_active = _begin_crop_tracking(ctx, node, rect)
+    # A FullscreenExtension object paints at `box`, out to the screen edges; its
+    # text, scroll bars and children keep its own rect.
+    stretched = _stretched_rect(node, rect, ctx)
+    box = stretched or rect
+    safe_clip = None if stretched else _safe_clip(ctx)
+
+    prev_crop_active = _begin_crop_tracking(ctx, node, box)
 
     name = node.get("_debug_path") or node.get("name") or node.get("type", "?")
 
@@ -981,7 +1055,7 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
             if group_color != [255, 255, 255]:
                 group_paint.setColorFilter(skia.ColorFilters.Blend(
                     skia.Color(*group_color, 255), skia.BlendMode.kModulate))
-            canvas.saveLayer(skia.Rect.MakeXYWH(rect.x, rect.y, rect.w, rect.h), group_paint)
+            canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h), group_paint)
             group_layer = True
 
     # 5. Apply rotation around rect center
@@ -1002,52 +1076,55 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
     has_canvas_group_gradient = node_type == "CanvasGroup" and gradient is not None
     if has_canvas_group_gradient:
         _annotate(canvas, f"CanvasGroup layer: {name}")
-        canvas.saveLayer(skia.Rect.MakeXYWH(rect.x, rect.y, rect.w, rect.h))
+        canvas.saveLayer(skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h))
     node_gradient = None if has_canvas_group_gradient else gradient
-    _annotate(canvas, f"BG: {name}")
-    draw_background(canvas, rect.x, rect.y, rect.w, rect.h, node, gradient=node_gradient)
+    with _clipped(canvas, safe_clip):
+        _annotate(canvas, f"BG: {name}")
+        draw_background(canvas, box.x, box.y, box.w, box.h, node, gradient=node_gradient)
 
     # 8. Border strokes (skipped during pass-1 of two-pass deferred rendering)
     if not ctx.get("_skip_strokes"):
-        for s in _sort_strokes(node.get("strokes", [])):
-            if not is_text or s.get("applyMode") == "Border":
-                _annotate(canvas, f"Stroke: {name} — thick={s.get('thickness', 1)}, pos={s.get('borderPosition', 'Outer')}")
-                draw_stroke(canvas, rect.x, rect.y, rect.w, rect.h, node, s)
+        with _clipped(canvas, safe_clip):
+            for s in _sort_strokes(node.get("strokes", [])):
+                if not is_text or s.get("applyMode") == "Border":
+                    _annotate(canvas, f"Stroke: {name} — thick={s.get('thickness', 1)}, pos={s.get('borderPosition', 'Outer')}")
+                    draw_stroke(canvas, box.x, box.y, box.w, box.h, node, s)
 
     # 8b. Clip AFTER strokes so Outer strokes aren't clipped by own clipsDescendants
     pushed_crop_clip = False
     if force_clip or node.get("clipsDescendants"):
-        corner_r = resolve_corner(node, rect.w, rect.h)
-        sk_rect = skia.Rect.MakeXYWH(rect.x, rect.y, rect.w, rect.h)
+        corner_r = resolve_corner(node, box.w, box.h)
+        sk_rect = skia.Rect.MakeXYWH(box.x, box.y, box.w, box.h)
         if corner_r > 0:
             canvas.clipRRect(skia.RRect.MakeRectXY(sk_rect, corner_r, corner_r))
         else:
             canvas.clipRect(sk_rect)
-        _push_crop_clip(ctx, rect)
+        _push_crop_clip(ctx, box)
         pushed_crop_clip = True
 
     scroll = _layout_scroll(node, ctx)
-    # A ScrollingFrame's bars draw in its own rect, outside the window its children see.
-    if scroll is not None:
-        _annotate(canvas, f"Scroll bars: {name}")
-        _draw_scroll_bars(canvas, node, rect, scroll, ctx.get("icons_dir"))
+    with _clipped(canvas, safe_clip):
+        # A ScrollingFrame's bars draw in its own rect, outside the window its children see.
+        if scroll is not None:
+            _annotate(canvas, f"Scroll bars: {name}")
+            _draw_scroll_bars(canvas, node, rect, scroll, ctx.get("icons_dir"))
 
-    # 9. Text rendering for text-based types
-    if is_text and node.get("text"):
-        _annotate(canvas, f"Text: {name} — '{node.get('text', '')[:30]}'")
-        draw_text(canvas, rect.x, rect.y, rect.w, rect.h, node, ctx.get("fonts_dir"),
-                  gradient=node_gradient if is_text else None)
+        # 9. Text rendering for text-based types
+        if is_text and node.get("text"):
+            _annotate(canvas, f"Text: {name} — '{node.get('text', '')[:30]}'")
+            draw_text(canvas, rect.x, rect.y, rect.w, rect.h, node, ctx.get("fonts_dir"),
+                      gradient=node_gradient if is_text else None)
 
-    # 10. Image rendering for image types or nodes with an icon
-    if is_image or node.get("icon"):
-        img = None
-        icon_key = node.get("icon", "")
-        icons_dir = ctx.get("icons_dir")
-        if icon_key and icons_dir:
-            img = load_icon(icon_key, icons_dir)
-        _annotate(canvas, f"Image: {name} — {icon_key}")
-        draw_image(canvas, rect.x, rect.y, rect.w, rect.h, node, img,
-                   gradient=node_gradient if is_image else None)
+        # 10. Image rendering for image types or nodes with an icon
+        if is_image or node.get("icon"):
+            img = None
+            icon_key = node.get("icon", "")
+            icons_dir = ctx.get("icons_dir")
+            if icon_key and icons_dir:
+                img = load_icon(icon_key, icons_dir)
+            _annotate(canvas, f"Image: {name} — {icon_key}")
+            draw_image(canvas, box.x, box.y, box.w, box.h, node, img,
+                       gradient=node_gradient if is_image else None)
 
     if scroll is not None:
         canvas.clipRect(skia.Rect.MakeXYWH(*scroll.window))
@@ -1108,7 +1185,7 @@ def render_node(canvas: skia.Canvas, node: dict, parent_rect: Rect, ctx: dict) -
 
     if has_canvas_group_gradient:
         _annotate(canvas, f"CanvasGroup gradient: {name}")
-        _draw_canvas_group_gradient(canvas, rect, gradient)
+        _draw_canvas_group_gradient(canvas, box, gradient)
         canvas.restore()
 
     if group_layer:
@@ -1135,6 +1212,7 @@ class _DrawEntry:
     node: dict
     rect: Rect
     canvas_ops: list = field(default_factory=list)  # ordered rotation/clip ops from ancestors + self
+    stretched: Rect | None = None  # where a FullscreenExtension object paints (_stretched_rect)
 
 
 def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
@@ -1153,7 +1231,10 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
     if "_rect_map" in ctx and "_path" in node:
         ctx["_rect_map"][node["_path"]] = rect
 
-    prev_crop_active = _begin_crop_tracking(ctx, node, rect)
+    stretched = None if degenerate else _stretched_rect(node, rect, ctx)
+    box = stretched or rect
+
+    prev_crop_active = _begin_crop_tracking(ctx, node, box)
     pushed_crop_clip = False
     pushed_window = False
     try:
@@ -1179,6 +1260,7 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
                 node=node,
                 rect=rect,
                 canvas_ops=list(ops),
+                stretched=stretched,
             ))
 
         # Add self-clip AFTER entry so only children inherit it. A zero-area node
@@ -1188,12 +1270,12 @@ def _collect_entries(node: dict, parent_rect: Rect, parent_ops: list,
         if ignore_scroll_clipping and node.get("type") == "ScrollingFrame":
             should_clip_children = False
         if should_clip_children:
-            corner_r = resolve_corner(node, rect.w, rect.h)
+            corner_r = resolve_corner(node, box.w, box.h)
             if corner_r > 0:
-                ops.append(("clip_rrect", rect.x, rect.y, rect.w, rect.h, corner_r))
+                ops.append(("clip_rrect", box.x, box.y, box.w, box.h, corner_r))
             else:
-                ops.append(("clip_rect", rect.x, rect.y, rect.w, rect.h))
-            _push_crop_clip(ctx, rect)
+                ops.append(("clip_rect", box.x, box.y, box.w, box.h))
+            _push_crop_clip(ctx, box)
             pushed_crop_clip = True
             scroll = _layout_scroll(node, ctx)
             if scroll is not None:
@@ -1494,21 +1576,26 @@ def _collect_grid_children(children: list[dict], content_rect: Rect,
         _collect_entries(child, content_rect, parent_ops, entries, ctx, override_rect=placed)
 
 
-def _draw_single_node(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict) -> None:
-    """Draw a single node's visuals (background, stroke, text, image) without recursion."""
+def _draw_single_node(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict,
+                      stretched: Rect | None = None) -> None:
+    """Draw a single node's visuals (background, stroke, text, image) without recursion.
+
+    A FullscreenExtension object's background, strokes and image draw at *stretched*.
+    """
     name = node.get("_debug_path") or node.get("name") or node.get("type", "?")
     gradient = node.get("gradient")
     node_type = node.get("type", "")
     is_text = node_type in ("TextLabel", "TextButton", "TextBox")
     is_image = node_type in ("ImageLabel", "ImageButton")
+    box = stretched or rect
     _annotate(canvas, f"BG: {name}")
-    draw_background(canvas, rect.x, rect.y, rect.w, rect.h, node, gradient=gradient)
+    draw_background(canvas, box.x, box.y, box.w, box.h, node, gradient=gradient)
 
     # Border strokes — after background, before content
     for s in _sort_strokes(node.get("strokes", [])):
         if not is_text or s.get("applyMode") == "Border":
             _annotate(canvas, f"Stroke: {name} — thick={s.get('thickness', 1)}, pos={s.get('borderPosition', 'Outer')}")
-            draw_stroke(canvas, rect.x, rect.y, rect.w, rect.h, node, s)
+            draw_stroke(canvas, box.x, box.y, box.w, box.h, node, s)
 
     scroll = _layout_scroll(node, ctx)
     if scroll is not None:
@@ -1527,7 +1614,7 @@ def _draw_single_node(canvas: skia.Canvas, node: dict, rect: Rect, ctx: dict) ->
         if icon_key and icons_dir:
             img = load_icon(icon_key, icons_dir)
         _annotate(canvas, f"Image: {name} — {icon_key}")
-        draw_image(canvas, rect.x, rect.y, rect.w, rect.h, node, img,
+        draw_image(canvas, box.x, box.y, box.w, box.h, node, img,
                    gradient=gradient if is_image else None)
 
     if ctx.get("debug"):
@@ -1542,8 +1629,11 @@ def _render_global(canvas: skia.Canvas, obj: dict, root_rect: Rect, ctx: dict) -
 
     entries.sort(key=lambda e: (e.z_index, e.dfs_order))
 
+    safe_clip = _safe_clip(ctx)
     for entry in entries:
         canvas.save()
+        if safe_clip is not None and entry.stretched is None:
+            canvas.clipRect(safe_clip)
         for op in entry.canvas_ops:
             if op[0] == "rotate":
                 canvas.rotate(op[1], op[2], op[3])
@@ -1552,7 +1642,7 @@ def _render_global(canvas: skia.Canvas, obj: dict, root_rect: Rect, ctx: dict) -
                 canvas.clipRRect(skia.RRect.MakeRectXY(sk_rect, op[5], op[5]))
             elif op[0] == "clip_rect":
                 canvas.clipRect(skia.Rect.MakeXYWH(op[1], op[2], op[3], op[4]))
-        _draw_single_node(canvas, entry.node, entry.rect, ctx)
+        _draw_single_node(canvas, entry.node, entry.rect, ctx, stretched=entry.stretched)
         canvas.restore()
 
 
@@ -1572,6 +1662,7 @@ def render_json(
     root_rect: Rect | None = None,
     layout_rects: dict | None = None,
     layout_scroll: dict | None = None,
+    safe_area=None,
     draw: bool = True,
 ):
     """Render a complete PinevexObject to a PNG file.
@@ -1597,6 +1688,11 @@ def render_json(
     ``_path``: the rect each node is drawn at, and each ScrollingFrame's window
     and bars (an ``rhr.scrolling.Scroll``). Without *layout_scroll* no scroll
     bars are drawn.
+
+    *safe_area* (an ``rhr.insets.SafeArea``) is what a ScreenGui paints outside
+    its device safe area on a notched screen: objects that cover that area paint
+    out to the screen edges, and the rest are clipped to it. Without it nothing
+    is stretched or clipped.
     """
     if draw:
         surface = skia.Surface(width, height)
@@ -1624,6 +1720,8 @@ def render_json(
         ctx["_layout_rects"] = layout_rects
     if layout_scroll is not None:
         ctx["_layout_scroll"] = layout_scroll
+    if safe_area is not None:
+        ctx["_safe_area"] = safe_area
 
     requested_behavior = _normalize_z_index_behavior(z_index_behavior) or "Sibling"
     root_behavior = _normalize_z_index_behavior(obj.get("zIndexBehavior")) or requested_behavior

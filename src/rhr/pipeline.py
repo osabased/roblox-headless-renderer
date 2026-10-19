@@ -128,6 +128,7 @@ def render_object(
 
     layout_rects = obj.pop("_layoutRects", None) if isinstance(obj, dict) else None
     layout_scroll = obj.pop("_layoutScroll", None) if isinstance(obj, dict) else None
+    safe_area = obj.pop("_safeArea", None) if isinstance(obj, dict) else None
     out_path = Path(out_path) if out_path is not None else None
     if draw:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,6 +145,7 @@ def render_object(
         root_rect=root_rect,
         layout_rects=layout_rects,
         layout_scroll=layout_scroll,
+        safe_area=safe_area,
         draw=draw,
     )
     return out_path if draw else None
@@ -378,7 +380,9 @@ def load_screens(
 
     Each ScreenGui gets its own content area from its own `ScreenInsets` (Task 1.9),
     which is why this is per screen rather than one rect for the file. A tree with no
-    ScreenGui is a single entry, the whole-viewport case.
+    ScreenGui is a single entry, the whole-viewport case. On a notched `--device` a
+    ScreenGui's object also carries what it paints outside that area
+    (obj["_safeArea"], an rhr.insets.SafeArea read by render_object).
     """
     from rhr.ui_engine.layout import Rect
 
@@ -424,6 +428,10 @@ def load_screens(
         x, y, w, h = inset.rect(width, height)
         obj = to_pinevex_object([node], postprocess)
         _attach_layout(obj, node, ir_by_path, (x, y, w, h))
+        if node.get("className") == "ScreenGui":
+            area = insets.safe_area(node.get("properties") or {}, width, height)
+            if area is not None:
+                obj["_safeArea"] = area
         out.append((obj, Rect(x, y, w, h), inset, node.get("name", "ScreenGui")))
     return out
 
@@ -612,10 +620,12 @@ def render_screens(
                 # one per pane (a model with a hundred SurfaceGuis has a hundred panes).
                 layout_rects = obj.pop("_layoutRects", None)
                 layout_scroll = obj.pop("_layoutScroll", None)
+                safe_area = obj.pop("_safeArea", None)
                 image = render_json(obj, None, width=width, height=height,
                                     icons_dir=Path(icons_dir) if icons_dir is not None else ICONS_DIR,
                                     fonts_dir=FONTS_DIR, bg_color=(0, 0, 0, 0), rect_map=pane_map,
-                                    root_rect=root_rect, layout_rects=layout_rects, layout_scroll=layout_scroll)
+                                    root_rect=root_rect, layout_rects=layout_rects, layout_scroll=layout_scroll,
+                                    safe_area=safe_area)
                 canvas.alpha_composite(image)
             if rect_map is not None and pane_map is not None:
                 rect_map.update(pane_map)

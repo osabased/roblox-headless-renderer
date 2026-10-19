@@ -10,9 +10,14 @@ Reference environment (see docs/known-approximations.md for sources):
 
     Roblox desktop, current top bar, no notch:  top 58, left/right/bottom 0
 
-Device insets are zero there, which is why `None`, `DeviceSafeInsets` and
-`FullscreenExtension` all resolve to the full viewport: on desktop they differ from
-each other only on notched devices. Only the top bar changes the geometry.
+Device insets are zero there, which is why `None` and `DeviceSafeInsets` both resolve
+to the full viewport: on desktop they differ only on notched devices. Only the top bar
+changes the geometry.
+
+On a notched `--device` screen two more ScreenGui properties change what is painted,
+not where things are laid out (`safe_area`): `SafeAreaCompatibility` stretches an
+object that covers the device safe area out to the screen edges, and
+`ClipToDeviceSafeArea` clips everything else to that area.
 
 `TopbarSafeInsets` is the one mode we do not model: its area is dynamic (it flexes
 around the top bar's own controls at runtime), so any constant we picked would be
@@ -37,6 +42,11 @@ MODES = {
 # Roblox's own default for a ScreenGui that does not say (and the value
 # `IgnoreGuiInset = false`, the default, implies).
 DEFAULT_MODE = "CoreUISafeInsets"
+
+COMPATIBILITY = {
+    0: "None",
+    1: "FullscreenExtension",
+}
 
 
 @dataclass(frozen=True)
@@ -75,22 +85,26 @@ def _truthy(value) -> bool:
     return value is True or (isinstance(value, str) and value.lower() == "true")
 
 
-def _mode_from_value(raw) -> str:
-    """The enum's name from any of the shapes the IR may carry it in."""
+def _enum_name(raw, names: dict[int, str], default: str) -> str:
+    """An enum's name from any of the shapes the IR may carry it in."""
     if isinstance(raw, dict):
         named = raw.get("name")
-        if isinstance(named, str) and named in MODES.values():
+        if isinstance(named, str) and named in names.values():
             return named
         value = raw.get("value")
-        if isinstance(value, int) and value in MODES:
-            return MODES[value]
+        if isinstance(value, int) and value in names:
+            return names[value]
     elif isinstance(raw, str):
         tail = raw.rsplit(".", 1)[-1]
-        if tail in MODES.values():
+        if tail in names.values():
             return tail
-    elif isinstance(raw, int) and raw in MODES:
-        return MODES[raw]
-    return DEFAULT_MODE
+    elif isinstance(raw, int) and raw in names:
+        return names[raw]
+    return default
+
+
+def _mode_from_value(raw) -> str:
+    return _enum_name(raw, MODES, DEFAULT_MODE)
 
 
 def mode_of(props: dict) -> str:
@@ -146,3 +160,43 @@ def for_nodes(
         if node.get("className") == "ScreenGui":
             return resolve(mode_of(node.get("properties") or {}), topbar_height)
     return Inset(0.0, 0.0, 0.0, 0.0, "no ScreenGui", "nothing to inset")
+
+
+@dataclass(frozen=True)
+class SafeArea:
+    """What a ScreenGui paints outside its device safe area, on a notched screen.
+
+    `screen` and `safe` are (x, y, w, h) in viewport pixels. `extend` is
+    SafeAreaCompatibility FullscreenExtension: an object whose total rect covers
+    `safe` on both axes paints out to the screen edges. `clip` is
+    ClipToDeviceSafeArea: everything that doesn't stretch is clipped to `safe`.
+    """
+
+    screen: tuple[float, float, float, float]
+    safe: tuple[float, float, float, float]
+    extend: bool
+    clip: bool
+
+
+def safe_area(props: dict, width: float, height: float) -> SafeArea | None:
+    """The ScreenGui's safe-area painting on the `--device` screen, from its raw props.
+
+    None when there is nothing to do: a screen without device insets, a ScreenGui
+    under ScreenInsets None (Studio ignores both properties there), or one that turns
+    both off. Measured in Studio's iPhone 16 emulator in Play (2026-10-18); the rules
+    are in docs/known-approximations.md.
+    """
+    from rhr import devices
+
+    left, top, right, bottom = devices.safe_insets()
+    if not any((left, top, right, bottom)) or mode_of(props) == "None":
+        return None
+    compatibility = _enum_name(props.get("SafeAreaCompatibility"), COMPATIBILITY, "FullscreenExtension")
+    clip = props.get("ClipToDeviceSafeArea")
+    area = SafeArea(
+        screen=(0.0, 0.0, float(width), float(height)),
+        safe=(left, top, max(0.0, width - left - right), max(0.0, height - top - bottom)),
+        extend=compatibility == "FullscreenExtension",
+        clip=not (clip is False or (isinstance(clip, str) and clip.lower() == "false")),
+    )
+    return area if area.extend or area.clip else None
