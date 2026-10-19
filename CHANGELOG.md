@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0rc1+osabased.6 (fork)
+
+1.0.0rc1+osabased.5 with these fixes.
+
+### Fixed
+
+- **`under-notch` and `under-touch-controls` measure the visible part of a button.**
+  They measured the whole rect, so a button in a ScrollingFrame (or a frame with
+  `ClipsDescendants`) was reported for a part the frame hides, though it is scrolled
+  into the frame to be used. Now the rect is intersected with every clipping ancestor
+  first, and a button with nothing left is skipped. `under-touch-controls` still sets the
+  overlap against the whole button's area, so a sliver is not judged as a small button.
+  `small-target` still uses the whole rect, and a button whose visible part reaches into
+  the notch is still reported.
+- **`invisible-content` counts a UIStroke that draws.** A transparent frame with a
+  stroke ring was reported as painting nothing. A stroke draws when its thickness is
+  above 0 and its transparency below 1. On a text object only a Border-mode stroke
+  counts, because a Contextual one outlines the text and paints only where the text does.
+
 ## 1.0.0rc1+osabased.5 (fork)
 
 1.0.0rc1+osabased.4 with these fixes.
