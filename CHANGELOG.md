@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.0.0rc1+osabased.5 (fork)
+
+1.0.0rc1+osabased.4 with these fixes.
+
+### When upgrading
+
+- **UserInputService:GetLastInputType() follows the `--device`**: Touch on `phone`,
+  `android` and `tablet`, Gamepad1 on `console`. It returned MouseButton1 on every
+  device.
+- **A new TextButton, ImageButton or TextBox starts with InputSink Activate**, as in
+  Studio and Roblox's docs. It started at None. `rhr hitmap` and `rhr check` don't read
+  InputSink, so neither changes.
+
+### Fixed
+
+- **A story reads the player's settings and input kind as a Studio play-test on the
+  `--device` does**, where each read raised an error:
+  - UserInputService.PreferredInput: KeyboardAndMouse on `desktop` and `laptop`,
+    Touch on `phone`, `android` and `tablet`, Gamepad on `console`. TouchEnabled,
+    KeyboardEnabled, MouseEnabled, GamepadEnabled and GetLastInputType match it.
+  - GuiService.ViewportDisplaySize: Medium on `desktop` and `laptop`, Small on
+    `phone`, `android` and `tablet`, Large on `console`, the sizes Roblox documents
+    for monitors, phones and tablets, and TVs.
+  - GuiService.PreferredTextSize Medium, PreferredTransparency 1 and
+    ReducedMotionEnabled false, Roblox's defaults as read in Studio.
+  - GuiService.TopbarInset: the whole top bar between the device's side insets, from
+    the top of the screen to the bottom of the bar: `Rect(0, 0, 1920, 58)` on
+    `desktop`, `Rect(59, 0, 793, 58)` on `phone`. RHR draws none of Roblox's top-bar
+    buttons, so none of the bar is taken. In Roblox the free area starts after its
+    buttons, about 208 px from the left in Studio's phone emulator.
+  - TextService:GetTextBoundsAsync: the same estimate GetTextSize makes, per line of
+    the params' Text, wrapped at its Width.
+  - GuiService:Select selects the visible Selectable descendant with the smallest
+    SelectionOrder into SelectedObject, and leaves SelectedObject alone when there is
+    none.
+
 ## 1.0.0rc1+osabased.4 (fork)
 
 1.0.0rc1+osabased.3 with these fixes, measured against Studio on 2026-10-19.
