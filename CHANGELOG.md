@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.0rc1+osabased.2 (fork)
+
+1.0.0rc1+osabased.1 with these fixes, measured against Studio on 2026-10-18.
+
+### When upgrading
+
+- **A story is laid out below the top bar**, and inside a phone's notches on
+  `--device`, as a game's own UI is in Play. On desktop it is 58 px lower than before,
+  unless `--topbar-height 0`.
+- **A ScrollingFrame child's Scale resolves against the canvas**, not the frame, as in
+  Studio (patch 0015 had it the other way). A child sized `UDim2.fromScale(1, 1)` in a
+  frame with a 1000 px canvas is now 1000 px tall.
+
+### Fixed
+
+- **Stories get the area a game's own UI gets in Play.** The story's ScreenGui ignored
+  the top bar, so its UI was drawn under it, and `target.AbsoluteSize` read the whole
+  screen. Now `target` is a default ScreenGui's area (734x314 at (59, 58) on `--device
+  phone`) and `GuiService:GetGuiInset()` returns the top bar. `check --devices` runs a
+  story once per device.
+- **ScrollingFrames draw their scroll bars and leave room for them.** A bar shows on
+  each axis whose canvas is longer than the frame, takes a ScrollBarThickness strip
+  from the window its children are clipped to, and puts its thumb where CanvasPosition
+  says. ScrollBarInset, VerticalScrollBarPosition, ScrollingDirection and
+  AutomaticCanvasSize are followed, and CanvasSize's Scale resolves against the frame's
+  parent. Within 1.5 px of Studio on every measured case.
+- **Custom scroll bar images are drawn as Studio draws them**: TopImage over the
+  thumb's first ScrollBarThickness, BottomImage over its last, MidImage stretched
+  between, tinted with ScrollBarImageColor3 and turned a quarter turn on a horizontal
+  bar. Roblox's default bar is drawn as a measured shape, since its images can't be
+  shipped. A bar image RHR can't draw is left out, with no stand-in, and listed in
+  `ui --json`'s `missingAssets`. `rhr fetch` downloads bar images, and `check` reports
+  one Roblox refused as `image-missing`.
+- **Phone notches are painted as in Studio.** Under `SafeAreaCompatibility`
+  FullscreenExtension (the default), an object that covers the device safe area paints
+  out to the screen edges, and under `ClipToDeviceSafeArea` (on by default) everything
+  else is clipped to the safe area. Nothing moves: AbsolutePosition, AbsoluteSize and
+  the layout are as before.
+
 ## 1.0.0rc1+osabased.1 (fork)
 
 1.0.0rc1 with these fixes, from osabased/roblox-headless-renderer.
