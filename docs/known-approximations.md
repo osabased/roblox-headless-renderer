@@ -592,9 +592,8 @@ notches and no home-bar inset; RHR applies the rule to each preset's own insets.
 
 **Story-time input and GUI reads** (`rhr layout` and the other story commands). A
 story reads a Studio play-test's values for the members UI code uses, which follow the
-preset where they differ: `console` has Gamepad1 connected
-(`GetConnectedGamepads`, `GetGamepadConnected`, `IsNavigationGamepad`,
-`GetNavigationGamepads`, a list of 18 `GetSupportedGamepadKeyCodes`) and
+preset where they differ: `console` has Gamepad1 connected (`GetConnectedGamepads`,
+`GetGamepadConnected`, a list of 18 `GetSupportedGamepadKeyCodes`) and
 `IsTenFootInterface` is true; the other presets have no gamepad and a false
 `IsTenFootInterface`. On every preset `TouchControlsEnabled` and the navigation flags
 start true, nothing is pressed or focused, the sensor and VR flags are false
@@ -603,9 +602,10 @@ start true, nothing is pressed or focused, the sensor and VR flags are false
 `GetImageForKeyCode` the default controller's `rbxasset://` image for a gamepad
 button, `""` for any other key; both were read from Studio on 2026-10-19 in Edit
 mode, so a console's own controller art, and other keyboard layouts, are not modelled.
-Studio's `GetNavigationGamepads` lists all eight pads with none connected; RHR lists
-the connected ones. The gamepad buttons `ButtonCenter`, `ButtonBack` and the four
-`ButtonUp` to `ButtonRight` have images in Studio but are missing from Lune's
+`GetNavigationGamepads` lists all eight pads on every preset, connected or not, and
+`IsNavigationGamepad` is true for each until `SetNavigationGamepad` turns it off, as
+Studio answered in Edit mode. The gamepad buttons `ButtonCenter`, `ButtonBack` and
+the four `ButtonUp` to `ButtonRight` have images in Studio but are missing from Lune's
 KeyCode enum, so a story cannot name them.
 
 Still errors in a story, as these members do for a script in Roblox:

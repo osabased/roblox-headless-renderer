@@ -182,12 +182,31 @@ local function gamepadIsConnected(gamepad)
 	return table.find(connectedGamepads(), gamepad) ~= nil
 end
 roblox.implementMethod("UserInputService", "GetConnectedGamepads", connectedGamepads)
-roblox.implementMethod("UserInputService", "GetNavigationGamepads", connectedGamepads)
 roblox.implementMethod("UserInputService", "GetGamepadConnected", function(_, gamepad)
 	return gamepadIsConnected(gamepad)
 end)
+-- Studio counts all eight gamepads as navigation gamepads, connected or not, until
+-- SetNavigationGamepad turns one off; it ignores the call for other input types.
+local navigates = {}
+for slot = 1, 8 do
+	navigates[`Gamepad{slot}`] = true
+end
+roblox.implementMethod("UserInputService", "GetNavigationGamepads", function()
+	local gamepads = {}
+	for slot = 1, 8 do
+		if navigates[`Gamepad{slot}`] then
+			table.insert(gamepads, roblox.Enum.UserInputType[`Gamepad{slot}`])
+		end
+	end
+	return gamepads
+end)
 roblox.implementMethod("UserInputService", "IsNavigationGamepad", function(_, gamepad)
-	return gamepadIsConnected(gamepad)
+	return navigates[gamepad.Name] == true
+end)
+roblox.implementMethod("UserInputService", "SetNavigationGamepad", function(_, gamepad, enabled)
+	if navigates[gamepad.Name] ~= nil then
+		navigates[gamepad.Name] = enabled == true
+	end
 end)
 local GAMEPAD_KEYS =
 	{ "ButtonX", "ButtonY", "ButtonA", "ButtonB", "ButtonR1", "ButtonL1", "ButtonR2", "ButtonL2", "ButtonR3",

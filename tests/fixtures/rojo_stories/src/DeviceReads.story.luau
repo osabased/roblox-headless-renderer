@@ -59,6 +59,13 @@ local reads: { [string]: () -> any } = {
 	IsNavigationGamepad = function()
 		return `{input:IsNavigationGamepad(pad1)} {input:IsNavigationGamepad(pad2)}`
 	end,
+	SetNavigationGamepad = function()
+		input:SetNavigationGamepad(pad2, false)
+		local off = `{show(input:GetNavigationGamepads())} {input:IsNavigationGamepad(pad2)}`
+		input:SetNavigationGamepad(pad2, true)
+		input:SetNavigationGamepad(Enum.UserInputType.Keyboard, true)
+		return `{off} {#input:GetNavigationGamepads()} {input:IsNavigationGamepad(Enum.UserInputType.Keyboard)}`
+	end,
 	GetSupportedGamepadKeyCodes = function()
 		local keys = input:GetSupportedGamepadKeyCodes(pad1)
 		local others = input:GetSupportedGamepadKeyCodes(pad2)

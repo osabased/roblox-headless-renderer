@@ -2,11 +2,12 @@
 """What a story reads of GuiService and UserInputService beyond the device's input kind, per `--device`.
 
 A Studio play-test reads Roblox's defaults for these (touch controls on, no key or
-button down, the keyboard's characters for GetStringForKeyCode) and the gamepad state of
-the device: the `console` preset has Gamepad1 connected and is a ten-foot interface, the
-others have no gamepad. `tests/fixtures/rojo_stories/src/DeviceReads.story.luau` reads
-each into a label; the ones that Roblox restricts to its own scripts (ViewportSizeInMM,
-GetScreenResolution and the like) are not in it.
+button down, the keyboard's characters for GetStringForKeyCode, all eight gamepads
+allowed to navigate) and the gamepad state of the device: the `console` preset has
+Gamepad1 connected and is a ten-foot interface, the others have no gamepad.
+`tests/fixtures/rojo_stories/src/DeviceReads.story.luau` reads each into a label; the
+ones that Roblox restricts to its own scripts (ViewportSizeInMM, GetScreenResolution and
+the like) are not in it.
 
     python tests/test_device_reads.py
 """
@@ -33,17 +34,13 @@ def check(ok: bool, message: str) -> None:
 NO_GAMEPAD = {
     "IsTenFootInterface": "false",
     "GetConnectedGamepads": "[]",
-    "GetNavigationGamepads": "[]",
     "GetGamepadConnected": "false false",
-    "IsNavigationGamepad": "false false",
     "GetSupportedGamepadKeyCodes": "0 nil nil 0",
 }
 GAMEPAD = {
     "IsTenFootInterface": "true",
     "GetConnectedGamepads": "[Gamepad1]",
-    "GetNavigationGamepads": "[Gamepad1]",
     "GetGamepadConnected": "true false",
-    "IsNavigationGamepad": "true false",
     "GetSupportedGamepadKeyCodes": "18 ButtonX Thumbstick2 0",
 }
 DEVICES = {
@@ -61,6 +58,9 @@ EVERY_DEVICE = {
     "GuiFlags": "true true true false false",
     "IsWindows": "true",
     "EmotesMenu": "false true",
+    "GetNavigationGamepads": "[Gamepad1,Gamepad2,Gamepad3,Gamepad4,Gamepad5,Gamepad6,Gamepad7,Gamepad8]",
+    "IsNavigationGamepad": "true true",
+    "SetNavigationGamepad": "[Gamepad1,Gamepad3,Gamepad4,Gamepad5,Gamepad6,Gamepad7,Gamepad8] false 8 false",
     "SensorFlags": "false false false false",
     "Mouse": "Default 1 [] true",
     "MouseIconContent": "Content",

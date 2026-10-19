@@ -104,12 +104,12 @@ the `--device`'s input (UserInputService.PreferredInput and the *Enabled flags) 
 GuiService.ViewportDisplaySize, Roblox's default player settings (PreferredTextSize,
 PreferredTransparency, ReducedMotionEnabled), and a TopbarInset that is the whole top
 bar, since RHR draws none of Roblox's buttons there. The `console` preset has Gamepad1
-connected (GetConnectedGamepads, GetGamepadConnected, GetNavigationGamepads,
-GetSupportedGamepadKeyCodes) and is a ten-foot interface (IsTenFootInterface); the
-others have no gamepad. Touch controls are on (TouchControlsEnabled), nothing is
-pressed, and GetStringForKeyCode and GetImageForKeyCode answer as a US keyboard and
-the default controller images do. Code that
-reads the camera's ViewportSize gets the whole screen (`--viewport`, `--device`),
+connected (GetConnectedGamepads, GetGamepadConnected, GetSupportedGamepadKeyCodes) and
+is a ten-foot interface (IsTenFootInterface); the others have no gamepad. On every
+preset all eight gamepads may navigate (GetNavigationGamepads), as in Studio; touch
+controls are on (TouchControlsEnabled), nothing is pressed, and GetStringForKeyCode and
+GetImageForKeyCode answer as a US keyboard and the default controller images do. Code
+that reads the camera's ViewportSize gets the whole screen (`--viewport`, `--device`),
 where Studio leaves out a phone's notches; other sizes read while the story runs are
 estimates; tweens end at their goal; controls take their defaults; nothing is
 clicked. A story that fails exits 2 with the error pointed at your files and lines.
