@@ -66,6 +66,7 @@ SEVERITIES = ("error", "warning", "info")
 _RANK = {name: rank for rank, name in enumerate(SEVERITIES)}
 TRUNCATE_OVERFLOW_MODES = {"AtEnd", "SplitWord"}
 BUTTON_CLASSES = {"TextButton", "ImageButton", "TextBox"}
+TEXT_CLASSES = {"TextLabel", "TextButton", "TextBox"}
 # A comfortable pointer target; a finger needs more (Apple's and Google's guidance:
 # 44 pt, 48 dp; Roblox's own touch buttons are 70 px on a phone).
 MIN_TARGET_PX = 24
@@ -229,16 +230,34 @@ def _painted_under(entry: dict, cx: float, cy: float, order: list[dict], start: 
     return None
 
 
-def _clipped(entry: dict, by_path: dict) -> bool:
-    """Whether something above `entry` clips it (ScrollingFrame, ClipsDescendants):
-    content outside the screen there is hidden or scrolled to, not lost."""
+def _clippers(entry: dict, by_path: dict):
+    """The ancestors of `entry` that clip it (ScrollingFrame, ClipsDescendants)."""
     path = entry["path"].rpartition("/")[0]
     while path:
         holder = by_path.get(path)
         if holder is not None and (holder.get("clipsDescendants") or holder.get("class") == "ScrollingFrame"):
-            return True
+            yield holder
         path = path.rpartition("/")[0]
-    return False
+
+
+def _clipped(entry: dict, by_path: dict) -> bool:
+    """Whether something above `entry` clips it (ScrollingFrame, ClipsDescendants):
+    content outside the screen there is hidden or scrolled to, not lost."""
+    return next(_clippers(entry, by_path), None) is not None
+
+
+def _visible_rect(entry: dict, by_path: dict) -> dict | None:
+    """The part of the entry's rect that every clipping ancestor leaves; None when
+    nothing is left."""
+    rect = entry["rect"]
+    left, top, right, bottom = rect["x"], rect["y"], rect["x"] + rect["w"], rect["y"] + rect["h"]
+    for holder in _clippers(entry, by_path):
+        box = holder["rect"]
+        left, top = max(left, box["x"]), max(top, box["y"])
+        right, bottom = min(right, box["x"] + box["w"]), min(bottom, box["y"] + box["h"])
+    if right <= left or bottom <= top:
+        return None
+    return {"x": left, "y": top, "w": right - left, "h": bottom - top}
 
 
 def check_off_screen(nodes: list[dict], ctx: dict) -> list[dict]:
@@ -303,7 +322,9 @@ def _overlap(rect: dict, box: tuple[float, float, float, float]) -> float:
 def check_device_obstructions(nodes: list[dict], ctx: dict) -> list[dict]:
     """On a --device: buttons where Roblox's touch controls are (a player's thumbs
     rest there, and the jump button is drawn on top), and buttons reaching into the
-    notch or home bar (measured in Studio's emulator, rhr.devices)."""
+    notch or home bar (measured in Studio's emulator, rhr.devices). Only the part a
+    clipping ancestor leaves visible counts: the rest is scrolled into the frame to
+    be used."""
     device = ctx.get("device")
     if device is None:
         return []
@@ -311,18 +332,22 @@ def check_device_obstructions(nodes: list[dict], ctx: dict) -> list[dict]:
     left, top, right, bottom = device.safe
     unsafe = [box for box in ((0.0, 0.0, left, height), (width - right, 0.0, right, height),
                               (0.0, height - bottom, width, bottom), (0.0, 0.0, width, top)) if box[2] > 0 and box[3] > 0]
+    by_path = ctx["by_path"]
     findings = []
     for entry in nodes:
-        rect = entry["rect"]
         if entry.get("class") not in BUTTON_CLASSES or not entry.get("visible") or _collapsed(entry, ctx):
             continue
+        rect = entry["rect"]
+        visible = _visible_rect(entry, by_path)
+        if visible is None:
+            continue
         for name, box in device.touch_controls.items():
-            if _overlap(rect, box) > 0.2 * min(rect["w"] * rect["h"], box[2] * box[3]):
+            if _overlap(visible, box) > 0.2 * min(rect["w"] * rect["h"], box[2] * box[3]):
                 what = "the jump button" if name == "jumpButton" else "the thumbstick's corner"
                 findings.append(_finding("under-touch-controls", "warning", entry,
                                          f"on a {device.name} this {entry['class']} is under {what} "
                                          f"({box[0]:.0f},{box[1]:.0f} {box[2]:.0f}x{box[3]:.0f})"))
-        if any(_overlap(rect, box) > 0 for box in unsafe):
+        if any(_overlap(visible, box) > 0 for box in unsafe):
             findings.append(_finding("under-notch", "warning", entry,
                                      f"on a {device.name} this {entry['class']} reaches into the notch or home bar "
                                      f"(safe area insets left {left:g}, right {right:g}, bottom {bottom:g})"))
@@ -381,10 +406,22 @@ def check_child_outside_clip(nodes: list[dict], ctx: dict) -> list[dict]:
     return findings
 
 
+def _stroke_paints(entry: dict) -> bool:
+    """A UIStroke of the entry draws a ring. On a text object only Border mode draws
+    the box's; a Contextual stroke outlines the text, which _could_paint counts."""
+    on_text = entry.get("class") in TEXT_CLASSES
+    return any(
+        float(stroke.get("thickness", 1)) > 0 and float(stroke.get("transparency", 0)) < 1
+        for stroke in entry.get("strokes") or []
+        if not on_text or stroke.get("applyMode") == "Border")
+
+
 def _could_paint(entry: dict) -> bool:
     """The node itself could put a pixel on the canvas."""
     text = _text(entry)
     if text is not None and float(text.get("transparency", 0.0)) < 1.0:
+        return True
+    if _stroke_paints(entry):
         return True
     bg = entry.get("background")
     return bool(bg and list(bg.get("color", [])) != _DEFAULT_GREY and float(bg.get("transparency", 1.0)) < 1.0)
