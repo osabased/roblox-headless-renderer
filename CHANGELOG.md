@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.0.0rc1+osabased.8 (fork)
+
+1.0.0rc1+osabased.7 with these fixes.
+
+### When upgrading
+
+- **Reading these in a story no longer raises**, so code that wrapped them in `pcall` to
+  survive the error now takes the value. `UserInputService:GetConnectedGamepads()` and
+  `GuiService:IsTenFootInterface()` follow the `--device`, so a story that adapts to a
+  gamepad or a TV renders its console layout under `--device console` and its other
+  layout everywhere else. `GetNavigationGamepads()` lists all eight gamepads on every
+  device, as Roblox does, so it does not say whether one is connected.
+
+### Fixed
+
+- **A story reads the gamepad, touch-control and input state of a Studio play-test on
+  the `--device`**, where each read raised an error:
+  - GuiService.TouchControlsEnabled: true. A story can set it, and reads back what it set.
+  - GuiService:IsTenFootInterface(): true on `console`, false elsewhere.
+  - UserInputService:GetConnectedGamepads(): `{Enum.UserInputType.Gamepad1}` on
+    `console`, `{}` elsewhere. GetGamepadConnected agrees with it, and
+    GetSupportedGamepadKeyCodes lists the 18 gamepad buttons for a connected pad.
+  - UserInputService:GetNavigationGamepads(): all eight gamepads on every `--device`,
+    connected or not, as in Studio. IsNavigationGamepad agrees with it, and
+    SetNavigationGamepad turns one off or back on.
+  - The rest of GuiService and UserInputService that a script can read and Roblox
+    answers with a plain value: AutoSelectGuiEnabled, CoreGuiNavigationEnabled,
+    GuiNavigationEnabled, IsModalDialog, IsWindows, MenuIsOpen, GetEmotesMenuOpen,
+    GetInspectMenuEnabled, the sensor, VR, modal, mouse and on-screen keyboard
+    properties, UserHeadCFrame and GetUserCFrame, IsKeyDown, IsMouseButtonPressed,
+    IsGamepadButtonDown, GetKeysPressed, GetMouseButtonsPressed, GetMouseDelta,
+    GetFocusedTextBox, GetStringForKeyCode and GetImageForKeyCode. The few that still
+    raise are listed in `docs/known-approximations.md`.
+
 ## 1.0.0rc1+osabased.7 (fork)
 
 1.0.0rc1+osabased.6 with these fixes.
