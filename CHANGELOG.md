@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0rc1+osabased.11 (fork)
+
+1.0.0rc1+osabased.10 with this fix.
+
+### When upgrading
+
+- **An ImageLabel named like a sunburst draws its own Image**, so a render of one whose
+  name contains "sunburst", "sunrays" or "rays" (also "Grayscale", "Arrays", "Trays")
+  changes, and baselines made with earlier versions need remaking.
+
+### Fixed
+
+- **An ImageLabel no longer has its image swapped for a sunburst by its name.** RHR drew
+  its own "Custom/Sunburst" icon over the Image of any ImageLabel whose name held
+  "sunburst", "sunrays" or "rays", whether or not the Image downloaded, so a missing
+  image under such a name was drawn and left out of `missingAssets`. The label now draws
+  its Image, or, when the Image can't be drawn, nothing, and `missingAssets` lists it.
+
 ## 1.0.0rc1+osabased.10 (fork)
 
 1.0.0rc1+osabased.9 with these fixes.
