@@ -296,8 +296,11 @@ def _not_drawn(path: Path, url: str = "") -> str | None:
     if digest in UNAVAILABLE_THUMBNAILS:
         return UNAVAILABLE
     match = _THUMBNAIL_TYPE.search(url)
-    kind = match.group(1) if match and match.group(1) != "Image" else "Audio" if digest in AUDIO_THUMBNAILS else None
-    if kind is None:
+    if match and match.group(1) != "Image":
+        kind = match.group(1)
+    elif digest in AUDIO_THUMBNAILS:
+        kind = "Audio"
+    else:
         return None
     return f"not an image: the id of {_THUMBNAIL_KINDS.get(kind, 'another kind of asset')}, not of an Image"
 

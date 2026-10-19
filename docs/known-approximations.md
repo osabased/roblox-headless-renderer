@@ -206,19 +206,20 @@ measured in the original's pixels) in the wrong place. An image RHR could not
 download (no Studio login, a failed connection) is asked for again on the next render;
 one Roblox refused, a day later. An asset id that is not an Image's (a Decal's, a
 Model's or a sound's) draws as nothing in Roblox, though Roblox's thumbnail service has
-a picture for it, and RHR leaves it out too. ScrollingFrame bar images have their own
+a picture for it, and RHR leaves it out too. RHR knows one by its file (a model file,
+not a picture), by the asset type its thumbnail's URL names (any type but `Image`) or
+by the speaker a sound's thumbnail shows. ScrollingFrame bar images have their own
 rules (ScrollingFrame, under UI layout).
 
 An image RHR cannot draw leaves its area empty, with no stand-in, and the report's
 `missingAssets` lists it with the reason: an asset id not downloaded (`offline` with
 `--offline`), one Roblox refused or that is not an image, a file built into the Roblox
-client (`rbxasset://`),
-which the UI renderer does not read, a `rbxthumb://` thumbnail, which Roblox makes at
-run time, or a link RHR does not read. Only an image the picture would show is listed:
-not a hidden or fully transparent one, one clipped away or off the screen, a
-HoverImage or PressedImage, or an empty Image or id 0, which Roblox draws as nothing
-too. A BillboardGui's or SurfaceGui's images are listed when its own picture leaves
-them out, whether or not the camera sees it. Each row names the instance (`path`,
+client (`rbxasset://`), which the UI renderer does not read, a `rbxthumb://` thumbnail,
+which Roblox makes at run time, or a link RHR does not read. Only an image the picture
+would show is listed: not a hidden or fully transparent one, one clipped away or off
+the screen, a HoverImage or PressedImage, or an empty Image or id 0, which Roblox draws
+as nothing too. A BillboardGui's or SurfaceGui's images are listed when its own picture
+leaves them out, whether or not the camera sees it. Each row names the instance (`path`,
 `class`), the part of the screen the image would cover (`rect`, in screen pixels: the
 bounding box of a rotated or in-world one, cut to what the screen and any clipping
 frame show) and, where RHR can say, how to get it drawn (`hint`); with
