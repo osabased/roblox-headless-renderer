@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.0.0rc1+osabased.14 (fork)
+
+1.0.0rc1+osabased.13 with these fixes.
+
+### When upgrading
+
+- **A story that arranges UI from the sizes it reads renders differently**, as it does
+  in a game, so baselines of such stories made with earlier versions need remaking. A
+  story that reads none renders as before: a 262-instance shop story's layout is the
+  same byte for byte, on desktop and phone.
+- **Stories run on story time, 1/60 s a frame**, so a timer fires on the frame it would
+  at 60 fps, however long RHR takes over a frame: a `task.delay(0.25)` fires on frame
+  15, where it fired on frame 19 of a run. A story that stops a tween or a countdown
+  on a timer can stop it on another frame. `os.time` and `DateTime` still read the
+  machine's clock.
+- **A story takes longer to run**: RHR checks its screen after the mount, every frame
+  and before saving, about 33 times, and lays it out again whenever it has changed. On
+  a warm server a 262-instance shop story takes 1.8 s, where it took 1.3 s (one
+  layout, about 0.3 s, and 8 ms a check); the small fixture stories take up to 0.2 s
+  more.
+- `RHR_STORY_SIZES=0` runs stories without layout, as before: every size reads zero.
+  Story time stays on.
+
+### Fixed
+
+- **A story reads the sizes it is drawn at**, where it read zero. RHR lays its screen
+  out after it mounts, once a frame and before it is saved, and writes what Roblox
+  works out, firing each change signal: AbsoluteSize, AbsolutePosition, TextBounds, a
+  layout's AbsoluteContentSize and a ScrollingFrame's AbsoluteCanvasSize and
+  AbsoluteWindowSize. Measured against Studio on desktop and phone: a list's canvas
+  set from its AbsoluteContentSize reads 280, where it read 0; a pill as wide as its
+  TextBounds is 200 px wide, where it was 0; grid cells sized from the grid's width
+  are 377 x 188, where they kept the 100 x 100 they start with; a breakpoint from a
+  bar's width reads "wide", where it never fired. A read in the same resumption that
+  parented the element still reads zero, where Roblox lays it out on the spot: read
+  it from its signal or `task.defer`. docs/known-approximations.md lists what else is
+  not served, and which reads no fixture compares with Studio.
+- **Timers and the clock follow frames**: a `task.defer` from the mount runs before
+  the first frame, where it ran on frame 1; `task.wait(0.1)` resumes on frame 6 and
+  returns 0.1, where it resumed on frame 9; `os.clock()` moves 0.4 s over 24 frames,
+  where it moved 0.37.
+
 ## 1.0.0rc1+osabased.13 (fork)
 
 1.0.0rc1+osabased.12 with these fixes.
