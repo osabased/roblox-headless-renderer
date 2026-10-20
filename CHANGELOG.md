@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.0rc1+osabased.13 (fork)
+
+1.0.0rc1+osabased.12 with these fixes.
+
+### When upgrading
+
+- **Renders of a UIGradient off the axes, and of any gradient on a UIStroke, change**,
+  so baselines made with earlier versions need remaking.
+
+### Fixed
+
+- **A UIGradient off the axes ramps over Studio's length**, the chord through the
+  box's centre along its Rotation, so its ends meet the box's edges. RHR spanned the
+  box's inscribed ellipse, which matches near 45 degrees on a 172 x 100 Frame but ran
+  157 px at 30 degrees, where Studio's runs 198.6, and 262 px on a 300 x 60 Frame,
+  where Studio's runs 120.
+- **A UIStroke's gradient spans the stroke's outer edge, as in Studio.** RHR spanned
+  the object, so a 12 px Outer stroke on a 140 px wide Frame ramped over 140 px, where
+  Studio's ramps over 164.
+
 ## 1.0.0rc1+osabased.12 (fork)
 
 1.0.0rc1+osabased.11 with these fixes.
