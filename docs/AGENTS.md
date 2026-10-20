@@ -110,14 +110,18 @@ preset all eight gamepads may navigate (GetNavigationGamepads), as in Studio; to
 controls are on (TouchControlsEnabled), nothing is pressed, and GetStringForKeyCode and
 GetImageForKeyCode answer as a US keyboard and the default controller images do. Code
 that reads the camera's ViewportSize gets the whole screen (`--viewport`, `--device`),
-where Studio leaves out a phone's notches. RHR lays the UI out after the story ran, so
-what Roblox works out in layout reads as it does before layout: other elements'
-AbsoluteSize and AbsolutePosition, TextBounds and AbsoluteContentSize are zero, and
-TextFits and an image's IsLoaded are true, so code that waits for them goes on; size
-from text with AutomaticSize or a layout, which RHR lays out as Roblox does.
-TextService's GetTextSize and GetTextBoundsAsync are rough estimates. Tweens end at
-their goal; controls take their defaults; nothing is clicked. A story that fails exits
-2 with the error pointed at your files and lines.
+where Studio leaves out a phone's notches. The story runs on story time, 1/60 s a frame
+(task.wait, delay, defer, os.clock), and RHR lays its screen out while it runs, after
+it mounts and once a frame, so it reads the sizes the picture is drawn at:
+AbsoluteSize, AbsolutePosition, TextBounds, AbsoluteContentSize and a ScrollingFrame's
+AbsoluteCanvasSize and AbsoluteWindowSize, from their change signals, a deferred
+thread or a later frame. A read in the same resumption that parented the element
+reads zero, where Roblox lays it out on the spot; read it from a signal or
+`task.defer` instead. TextFits and an image's IsLoaded are true, so code that waits
+for them goes on. TextService's GetTextSize and GetTextBoundsAsync are rough
+estimates. Tweens end at their goal; controls take their defaults; nothing is
+clicked. `RHR_STORY_SIZES=0` runs stories without layout, every such read zero. A
+story that fails exits 2 with the error pointed at your files and lines.
 
 ## How far to trust the output
 

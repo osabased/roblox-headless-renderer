@@ -218,6 +218,54 @@ def _text_extent(node: dict, wrap_width: float | None) -> tuple[float, float] | 
     return (max(lines, default=0.0), size * line_height * len(lines))
 
 
+_MEASURING_CANVAS = None
+
+
+def text_bounds(node: dict, box: Box) -> tuple[float, float]:
+    """A text object's TextBounds when laid out at `box`: the text's extent as the paint
+    pass lays it out (TextScaled's fitted size, wrapping at the box, UIScale), in pixels.
+
+    Text with RichText markup is measured as its plain text at the object's TextSize.
+    """
+    global _MEASURING_CANVAS
+    import re
+
+    import skia
+
+    from rhr.adapter import ir_node_to_raw
+    from rhr.pipeline import FONTS_DIR
+    from rhr.ui_engine.converter import flatten_node
+    from rhr.ui_engine.text_renderers import _draw_text_plain
+
+    shallow = dict(node, children=[child for child in _children(node) if child.get("className") not in GUI_OBJECT_CLASSES])
+    engine_node = flatten_node(ir_node_to_raw(shallow))
+    text = str(engine_node.get("text") or "")
+    if not text:
+        return (0.0, 0.0)
+    scaled, wrapped = _bool(node, "TextScaled", False), _bool(node, "TextWrapped", False)
+    if engine_node.get("richText") and re.search(r"<[^>]*>", text):
+        extent = _text_extent(node, box.w / box.scale if wrapped and box.scale else None)
+        return (extent[0] * box.scale, extent[1] * box.scale) if extent else (0.0, 0.0)
+    engine_node.pop("richText", None)
+    engine_node["textSize"] = float(engine_node.get("textSize", 14.0)) * box.scale
+    # Roblox measures text it does not draw (transparent, in a zero-width box).
+    engine_node["textTransparency"] = 0.0
+    w, h = box.w, box.h
+    if w <= 0 or h <= 0:
+        if scaled:
+            return (0.0, 0.0)
+        engine_node["textWrapped"] = False
+        w, h = max(w, 1e5), max(h, 1e5)
+    if _MEASURING_CANVAS is None:
+        _MEASURING_CANVAS = skia.Surface(1, 1)
+    _draw_text_plain(_MEASURING_CANVAS.getCanvas(), 0.0, 0.0, w, h, engine_node, FONTS_DIR)
+    laid_out = engine_node.get("_textLayout")
+    if laid_out:
+        return (float(laid_out["bounds"][0]), float(laid_out["bounds"][1]))
+    extent = _text_extent(node, w / box.scale if (wrapped or scaled) and box.scale else None)
+    return (extent[0] * box.scale, extent[1] * box.scale) if extent else (0.0, 0.0)
+
+
 # ---------------------------------------------------------------- the pass
 
 class UILayout:
@@ -229,6 +277,9 @@ class UILayout:
         # parent's pass must not re-resolve them from Position/Size.
         self.placed_by_ancestor: set[str] = set()
         self.scrolls: dict[str, scrolling.Scroll] = {}
+        # Each layout object's AbsoluteContentSize: the extent it gave its items, its
+        # own Padding between them included.
+        self.contents: dict[str, tuple[float, float]] = {}
 
     # A node's own rect, before its children are placed.
     def _resolve(self, node: dict, parent: Box, k: float, *, position: bool = True) -> Box:
@@ -328,13 +379,13 @@ class UILayout:
         children = _gui_children(node)
         kind = layout.get("className") if layout is not None else None
         if kind == "UIListLayout":
-            self._list(layout, children, content, k)
+            self.contents[layout["path"]] = self._list(layout, children, content, k)
         elif kind == "UIPageLayout":
-            self._pages(layout, children, content, k)
+            self.contents[layout["path"]] = self._pages(layout, children, content, k)
         elif kind == "UIGridLayout":
-            self._grid(layout, children, content, k)
+            self.contents[layout["path"]] = self._grid(layout, children, content, k)
         elif kind == "UITableLayout":
-            self._table(layout, children, content, k)
+            self.contents[layout["path"]] = self._table(layout, children, content, k)
         else:
             for child in children:
                 if child["path"] in self.placed_by_ancestor:
@@ -348,7 +399,7 @@ class UILayout:
 
     # ------------------------------------------------------------ UIListLayout
 
-    def _list(self, layout: dict, children: list[dict], content: Box, k: float) -> None:
+    def _list(self, layout: dict, children: list[dict], content: Box, k: float) -> tuple[float, float]:
         horizontal = _enum(layout, "FillDirection", "Vertical") == "Horizontal"
         items = [child for child in _sorted(children, layout)]
         main_size = content.w if horizontal else content.h
@@ -400,6 +451,7 @@ class UILayout:
         else:
             cross_cursor = 0.0
 
+        used_main = used_cross = 0.0
         for line, line_extent in zip(lines, line_cross):
             if not wraps:
                 line_extent = cross_size
@@ -446,11 +498,16 @@ class UILayout:
                     placed = Box(content.x + cross_cursor + offset, content.y + cursor, item_cross, size_main, box.scale)
                 self.boxes[child["path"]] = placed
                 cursor += size_main + gap
+                used_cross = max(used_cross, item_cross)
+            used_main = max(used_main, cursor - gap - start)
             cross_cursor += line_extent + cross_padding
+        if wraps:
+            used_cross = sum(line_cross) + cross_padding * max(0, len(lines) - 1)
+        return (used_main, used_cross) if horizontal else (used_cross, used_main)
 
     # ------------------------------------------------------------ UIPageLayout
 
-    def _pages(self, layout: dict, children: list[dict], content: Box, k: float) -> None:
+    def _pages(self, layout: dict, children: list[dict], content: Box, k: float) -> tuple[float, float]:
         """Pages side by side, one container length (plus Padding) apart, the first page
         at the container's origin (edit mode shows the first page). A page smaller than
         the container keeps its own size and sits at the start of its slot (Studio: half
@@ -460,6 +517,7 @@ class UILayout:
         main_size = content.w if horizontal else content.h
         step = main_size + pad_scale * main_size + pad_offset * k
         index = 0
+        last_main = cross_extent = 0.0
         for child in _sorted(children, layout):
             box = self._resolve(child, content, k, position=False)
             if not _visible(child):
@@ -471,6 +529,10 @@ class UILayout:
                 placed = Box(content.x, content.y + index * step, box.w, box.h, box.scale)
             self.boxes[child["path"]] = placed
             index += 1
+            last_main = box.w if horizontal else box.h
+            cross_extent = max(cross_extent, box.h if horizontal else box.w)
+        main_extent = (index - 1) * step + last_main if index else 0.0
+        return (main_extent, cross_extent) if horizontal else (cross_extent, main_extent)
 
     @staticmethod
     def _flex_ratio(child: dict, container_flex: str, kind: str) -> float:
@@ -494,7 +556,7 @@ class UILayout:
 
     # ------------------------------------------------------------ UIGridLayout
 
-    def _grid(self, layout: dict, children: list[dict], content: Box, k: float) -> None:
+    def _grid(self, layout: dict, children: list[dict], content: Box, k: float) -> tuple[float, float]:
         items = [child for child in _sorted(children, layout) if _visible(child)]
         for child in children:
             if not _visible(child):
@@ -516,7 +578,7 @@ class UILayout:
             per_line = min(per_line, cap)
         count = len(items)
         if not count:
-            return
+            return (0.0, 0.0)
         lines = math.ceil(count / per_line)
         cols, rows = (min(count, per_line), lines) if horizontal else (lines, min(count, per_line))
         block_w = cols * cell_w + max(0, cols - 1) * pad_x
@@ -543,10 +605,11 @@ class UILayout:
             cell_x = origin_x + col * (cell_w + pad_x)
             cell_y = origin_y + row * (cell_h + pad_y)
             self.boxes[child["path"]] = Box(cell_x + (cell_w - w) / 2, cell_y + (cell_h - h) / 2, w, h, k * own)
+        return (block_w, block_h)
 
     # ------------------------------------------------------------ UITableLayout
 
-    def _table(self, layout: dict, children: list[dict], content: Box, k: float) -> None:
+    def _table(self, layout: dict, children: list[dict], content: Box, k: float) -> tuple[float, float]:
         rows = [child for child in _sorted(children, layout) if _visible(child)]
         pxs, pxo, pys, pyo = _udim2(layout, "Padding")
         pad_x, pad_y = pxs * content.w + pxo * k, pys * content.h + pyo * k
@@ -595,6 +658,7 @@ class UILayout:
         for row in children:
             if row["path"] not in self.boxes:
                 self.boxes[row["path"]] = self._resolve(row, content, k)
+        return (sum(col_w) + pad_x * max(0, len(col_w) - 1), sum(row_h) + pad_y * max(0, len(row_h) - 1))
 
 
 def _align(mode: str, container: float, extent: float) -> float:
@@ -606,13 +670,14 @@ def _align(mode: str, container: float, extent: float) -> float:
 
 
 def lay_out_pane(root: dict, rect: tuple[float, float, float, float],
-                 scrolls: dict[str, scrolling.Scroll] | None = None) -> dict[str, Box]:
+                 scrolls: dict[str, scrolling.Scroll] | None = None,
+                 contents: dict[str, tuple[float, float]] | None = None) -> dict[str, Box]:
     """Lay out one pane: a ScreenGui (or other canvas) node inside its content rect.
 
     `root` is a ScreenGui/SurfaceGui/BillboardGui whose GuiObject descendants are laid
     out inside `rect`, or a lone GuiObject laid out as if its parent were `rect`.
     `scrolls`, when given, receives each ScrollingFrame's scrolling (rhr.scrolling.Scroll)
-    by path.
+    by path; `contents` each layout object's AbsoluteContentSize by path.
     """
     x, y, w, h = rect
     engine = UILayout()
@@ -623,6 +688,8 @@ def lay_out_pane(root: dict, rect: tuple[float, float, float, float],
         engine._place_children(root, canvas, 1.0)
     if scrolls is not None:
         scrolls.update(engine.scrolls)
+    if contents is not None:
+        contents.update(engine.contents)
     return engine.boxes
 
 

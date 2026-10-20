@@ -20,18 +20,26 @@ device does (desktop without one): UserInputService.PreferredInput and the
 PreferredTransparency and ReducedMotionEnabled, and a TopbarInset that is the whole
 top bar between the device's side insets (RHR draws none of Roblox's buttons there).
 
-What does not carry over: RHR lays the UI out after the story ran, so what Roblox works
-out in layout reads as it does before layout (other elements' AbsoluteSize and
-AbsolutePosition, TextBounds, AbsoluteContentSize and the like are zero), except that
-TextFits and an image's IsLoaded read true; the camera's ViewportSize is the whole
-screen, where Studio leaves out a notch's side insets; TextService:GetTextBoundsAsync
-and GetTextSize are rough estimates; tweens end at their goal; the story's controls
-take their defaults; nothing is clicked.
+The story runs on story time, 1/60 s a frame: task.wait, delay, defer and cancel,
+os.clock, tick and time follow it, so a timer fires on the frame it would at 60 fps.
+After it mounts, once a frame between PreRender and Heartbeat, and before it is saved,
+RHR lays the screen out as the render will (rhr.story_sizes) and the story reads the
+result, with its change signals: AbsoluteSize, AbsolutePosition, TextBounds, a layout's
+AbsoluteContentSize, a ScrollingFrame's AbsoluteCanvasSize and AbsoluteWindowSize.
+RHR_STORY_SIZES=0 turns that off.
+
+What does not carry over: a read in the same resumption that parented the element
+comes before any layout and reads zero, as do the other layout reads (AbsoluteRotation,
+a UIGridLayout's AbsoluteCellSize and AbsoluteCellCount) and elements outside the
+story's screen; TextFits and an image's IsLoaded read true; the camera's ViewportSize
+is the whole screen, where Studio leaves out a notch's side insets;
+TextService:GetTextBoundsAsync and GetTextSize are rough estimates; tweens end at their
+goal; the story's controls take their defaults; nothing is clicked.
 
 A story is run again only when something it runs on changed (the project's files,
-the screen, its insets and device, RHR's runtime): `check` then `ui` of the same story runs
-it once. A story that builds something different each run (random, the clock) keeps
-its first.
+the screen, its insets and device, RHR's runtime and version, whether sizes are on):
+`check` then `ui` of the same story runs it once. A story that builds something
+different each run (random numbers, the date) keeps its first.
 """
 
 from __future__ import annotations
@@ -150,11 +158,11 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     """Run `story` on a `width` x `height` screen (the `--device` one's insets and
     input, a `topbar_height` top bar, 58 by default) and return the model file with
     the UI it built."""
-    from rhr import devices, insets, rojo
+    import rhr
+    from rhr import devices, insets, rojo, story_sizes
     from rhr.ir import lune_executable
-    from rhr.procs import no_window
 
-    from rhr.profile import phase
+    from rhr.profile import add, phase
 
     project = find_project(story)
     name = story_name(story)
@@ -163,7 +171,8 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     device = devices.current()
     area = json.dumps({"insets": [core.left, core.top, core.right, core.bottom], "topbar": topbar,
                        "input": device.preferred_input, "displaySize": device.display_size})
-    key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}".encode("utf-8")).hexdigest()[:12]
+    sizes = "on" if story_sizes.enabled() else "off"
+    key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}|{sizes}".encode("utf-8")).hexdigest()[:12]
     # One folder per story and screen, the file named after the story: documents name
     # their source by this file's name ("model": "Shop.story.json").
     out = IR_DIR / "stories" / key / f"{name}.story.rbxm"
@@ -171,8 +180,8 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     stamp = out.with_name(out.name + ".inputs")
     with phase("story: inputs check"):
         runtime = (PACKAGE / "luau" / "story-runtime.luau").stat()
-        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area,
-                             runtime.st_size, runtime.st_mtime_ns, str(lune_executable())])
+        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes,
+                             runtime.st_size, runtime.st_mtime_ns, str(lune_executable()), rhr.__version__])
     try:
         kept = json.loads(stamp.read_text(encoding="utf-8"))
         if out.is_file() and kept.get("inputs") == inputs:
@@ -189,20 +198,26 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
         built = rojo.build(project, IR_DIR)
     with phase("story: rojo sourcemap"):
         names, files = module_path(project, story)
+    passes = story_sizes.Passes(core.rect(width, height)) if sizes == "on" else None
     with phase("story: run (Lune)"):
-        proc = subprocess.run(
+        proc, stats = story_sizes.run(
             [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built), json.dumps(names),
-             str(out), str(width), str(height), name, area],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
-            timeout=TIMEOUT_S, **no_window())
+             str(out), str(width), str(height), name, area, sizes], passes, timeout=TIMEOUT_S)
+    if passes is not None:
+        add("story: layout passes (Python)", passes.seconds)
+        add("story: layout passes (round trip)", float(stats.get("seconds") or 0))
     problems = _tidy(_point_at_files(proc.stderr.strip(), files, project.parent))
+    if passes is not None and passes.problems:
+        problems = "\n".join([*passes.problems, *filter(None, [problems])])
     if proc.returncode != 0 or not out.is_file():
         raise RuntimeError(f"the story {story.name} failed:\n{problems or proc.stdout.strip() or 'no output'}")
     count = proc.stdout.strip().rpartition(" ")[2]
     stamp.write_text(json.dumps({"inputs": inputs, "count": count, "problems": problems.splitlines()}),
                      encoding="utf-8")
     if log is not None:
-        log(f"story  {story.name}: ran it in its Rojo project, {count} instances built")
+        log(f"story  {story.name}: ran it in its Rojo project, {count} instances built" + (
+            f", {passes.count} layout passes ({passes.skipped} on an unchanged screen) in {passes.seconds:.2f} s"
+            if passes is not None else ""))
         for line in problems.splitlines()[:10]:
             log(f"story  {line}")
     return out

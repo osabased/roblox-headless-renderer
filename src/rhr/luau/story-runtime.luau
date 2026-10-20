@@ -1,13 +1,13 @@
 -- Run one UI story headlessly and save the UI it builds (rhr.story).
 --
---   lune run story-runtime.luau <built.rbxl|rbxm> <module path JSON> <out.rbxm> <width> <height> <name> <area JSON>
+--   lune run story-runtime.luau <built.rbxl|rbxm> <module path JSON> <out.rbxm> <width> <height> <name> <area JSON> <sizes>
 --
 -- The built file is the Rojo project; the module path (a JSON list of names from the
 -- root) is the story's ModuleScript in it. Every UI library ends in the same calls
 -- (Instance.new, set properties, parent), so this copies the Roblox side, not any
 -- library: Lune's own instances (properties, datatypes, Enums, saving), plus events,
--- the services UI code touches, require by instance or relative path, and a frame
--- loop that lets the UI settle. Story forms: function(target) (Hoarcekat, UI Labs);
+-- the services UI code touches, require by instance or relative path, and frames on
+-- story time that let the UI settle. Story forms: function(target) (Hoarcekat, UI Labs);
 -- UI Labs tables with react/reactRoblox, roact, fusion, vide or a generic render;
 -- Flipbook's table.
 -- The area ({"insets": [left, top, right, bottom], "topbar": height, "input": kind,
@@ -16,6 +16,7 @@
 -- ScreenGui is that size, and GetGuiInset reads the top bar. It is Sibling, as UI
 -- Labs mounts stories (Instance.new gives Global). Player settings read Roblox's
 -- defaults, as in a Studio play-test.
+-- With sizes "on", rhr.story answers layout passes (see Layout passes) over stdin.
 -- Scripts' own threads are left behind: the process exits once the UI is saved.
 local roblox = require("@lune/roblox")
 local fs = require("@lune/fs")
@@ -23,7 +24,6 @@ local luau = require("@lune/luau")
 local process = require("@lune/process")
 local serde = require("@lune/serde")
 local stdio = require("@lune/stdio")
-local task = require("@lune/task")
 
 local builtPath, modulePathJson, outPath = process.args[1], process.args[2], process.args[3]
 local viewport = roblox.Vector2.new(tonumber(process.args[4]) or 1615, tonumber(process.args[5]) or 1080)
@@ -40,6 +40,117 @@ local function fail(message)
 	process.exit(1)
 end
 
+-- Story time ------------------------------------------------------------------------
+-- The story's threads run here, not on Lune's scheduler: Lune runs its queued threads
+-- whenever the runtime waits on I/O, as it does for a layout pass, and its clock is
+-- the machine's. Story time is the frame count over 60, so a timer fires on the frame
+-- it would in a game at 60 fps, however long a frame takes here.
+local storyFrame = 0
+local function now()
+	return storyFrame / 60
+end
+local deferred, sleeping = {}, {}
+local pending = {} -- thread -> the deferred or sleeping entry due to resume it
+local sleeps = 0
+
+local function resume(thread, ...)
+	pending[thread] = nil
+	local okResume, problem = coroutine.resume(thread, ...)
+	if not okResume then
+		stdio.ewrite(debug.traceback(thread, tostring(problem)) .. "\n")
+	end
+end
+local function threadOf(fn)
+	return if type(fn) == "thread" then fn else coroutine.create(fn)
+end
+local function sleep(seconds, entry)
+	sleeps += 1
+	entry.due = now() + math.max(tonumber(seconds) or 0, 0)
+	entry.order = sleeps
+	pending[entry.thread] = entry
+	table.insert(sleeping, entry)
+end
+local function wake(entry)
+	if pending[entry.thread] ~= entry then
+		return false
+	end
+	if entry.start then
+		resume(entry.thread, now() - entry.start)
+	else
+		resume(entry.thread, table.unpack(entry.args, 1, entry.args.n))
+	end
+	return true
+end
+
+local storyTask = {}
+function storyTask.spawn(fn, ...)
+	local thread = threadOf(fn)
+	resume(thread, ...)
+	return thread
+end
+function storyTask.defer(fn, ...)
+	local thread = threadOf(fn)
+	local entry = { thread = thread, args = table.pack(...) }
+	pending[thread] = entry
+	table.insert(deferred, entry)
+	return thread
+end
+function storyTask.delay(seconds, fn, ...)
+	local thread = threadOf(fn)
+	sleep(seconds, { thread = thread, args = table.pack(...) })
+	return thread
+end
+function storyTask.wait(seconds)
+	sleep(seconds, { thread = coroutine.running(), start = now() })
+	return coroutine.yield()
+end
+function storyTask.cancel(thread)
+	pending[thread] = nil
+	pcall(coroutine.close, thread)
+end
+
+-- Deferred threads run at the end of each step of a frame, as Roblox runs them at its
+-- resumption points; those they defer in turn run in the same drain.
+local DRAIN_ROUNDS = 100
+local drainWarned = false
+local function drain()
+	local ran = 0
+	for _ = 1, DRAIN_ROUNDS do
+		if #deferred == 0 then
+			return ran
+		end
+		local batch = deferred
+		deferred = {}
+		for _, entry in batch do
+			if wake(entry) then
+				ran += 1
+			end
+		end
+	end
+	if not drainWarned then
+		drainWarned = true
+		stdio.ewrite(`task.defer went on deferring for {DRAIN_ROUNDS} rounds; the rest ran a step later\n`)
+	end
+	return ran
+end
+
+-- Timers due by now, in the order they fall due.
+local function wakeSleepers()
+	local time, due, rest = now(), {}, {}
+	for _, entry in sleeping do
+		if pending[entry.thread] == entry then
+			table.insert(if entry.due <= time + 1e-9 then due else rest, entry)
+		end
+	end
+	sleeping = rest
+	table.sort(due, function(a, b)
+		return if a.due ~= b.due then a.due < b.due else a.order < b.order
+	end)
+	for _, entry in due do
+		wake(entry)
+	end
+end
+
 -- Signals ---------------------------------------------------------------------------
 -- Library code checks typeof(x) == "RBXScriptSignal": the sandbox's typeof reads __type.
 local Signal = { __type = "RBXScriptSignal" }
@@ -47,11 +158,13 @@ Signal.__index = Signal
 local Connection = { __type = "RBXScriptConnection" }
 Connection.__index = Connection
 
+local connections = 0
 function Signal.new()
 	return setmetatable({ handlers = {} }, Signal)
 end
 function Signal:Connect(fn)
-	local connection = setmetatable({ Connected = true }, Connection)
+	connections += 1
+	local connection = setmetatable({ Connected = true, order = connections }, Connection)
 	local handlers = self.handlers
 	handlers[connection] = fn
 	function connection.Disconnect()
@@ -70,15 +183,29 @@ function Signal:Once(fn)
 	end)
 	return connection
 end
+-- In the order they connected; one a handler disconnects before its turn is skipped.
 function Signal:Fire(...)
-	for _, fn in self.handlers do
-		task.spawn(fn, ...)
+	local handlers = self.handlers
+	local connected = {}
+	for connection in handlers do
+		table.insert(connected, connection)
+	end
+	table.sort(connected, function(a, b)
+		return a.order < b.order
+	end)
+	for _, connection in connected do
+		local fn = handlers[connection]
+		if fn then
+			storyTask.spawn(fn, ...)
+		end
 	end
 end
 function Signal:Wait()
 	local thread = coroutine.running()
 	self:Once(function(...)
-		task.spawn(thread, ...)
+		if coroutine.status(thread) == "suspended" then
+			resume(thread, ...)
+		end
 	end)
 	return coroutine.yield()
 end
@@ -352,11 +479,12 @@ roblox.implementMethod("HttpService", "JSONDecode", function(_, text)
 	return serde.decode("json", text)
 end)
 
--- What Roblox works out as it lays GUI out, which RHR does only after the story ran.
--- Lune has no value for these, so a read would raise: they read as Studio's do on a new
--- element, except that TextFits and an image's IsLoaded are true, so code that waits
--- for them, or shrinks text until it fits, goes on, and a grid's AbsoluteCellSize is
--- zero, where Studio's is the CellSize it starts with, which a story usually changes.
+-- What Roblox works out as it lays GUI out. Lune has no value for these, so a read
+-- would raise: they read as Studio's do on a new element until a layout pass writes
+-- the sizes (see Layout passes), except that TextFits and an image's IsLoaded are true,
+-- so code that waits for them, or shrinks text until it fits, goes on, and a grid's
+-- AbsoluteCellSize is zero, where Studio's is the CellSize it starts with, which a
+-- story usually changes.
 local ZERO = roblox.Vector2.new(0, 0)
 local TEXT = { TextBounds = ZERO, TextFits = true, OpenTypeFeaturesError = "" }
 local IMAGE = { IsLoaded = true }
@@ -546,13 +674,15 @@ base = {
 	},
 	Enum = roblox.Enum,
 	TweenInfo = TweenInfo,
-	task = task,
-	wait = task.wait,
-	delay = task.delay,
-	spawn = task.spawn,
-	tick = os.clock,
-	time = os.clock,
-	elapsedTime = os.clock,
+	task = storyTask,
+	wait = function(seconds)
+		return storyTask.wait(seconds), now()
+	end,
+	delay = storyTask.delay,
+	spawn = storyTask.spawn,
+	tick = now,
+	time = now,
+	elapsedTime = now,
 	settings = function()
 		return {}
 	end,
@@ -596,6 +726,8 @@ base.debug = table.clone(debug)
 for _, name in { "profilebegin", "profileend", "setmemorycategory", "resetmemorycategory" } do
 	base.debug[name] = function() end
 end
+base.os = table.clone(os)
+base.os.clock = now
 
 -- Run -----------------------------------------------------------------------------------
 local storyScript = game
@@ -625,17 +757,151 @@ pcall(function()
 	target.AbsoluteSize = areaSize
 end)
 
-local runService = game:GetService("RunService")
-local function frames(count)
-	for _ = 1, count do
-		for _, fn in renderSteps do
-			task.spawn(fn, 1 / 60)
+-- Layout passes ---------------------------------------------------------------------
+-- Lune lays nothing out, so rhr.story does, with the render's own layout: at a pass
+-- the runtime saves the live screen, prints `RHR-PASS <file>` and reads back one JSON
+-- line, {path: {s, p, c, t, cs, w}}, of what Roblox would work out for each element.
+-- It writes the values that changed and fires their signals, so the story reads the
+-- sizes the render draws, from a signal, a deferred thread or a later frame. A read in
+-- the same resumption that parented the element comes before any pass and reads zero,
+-- where Roblox lays the element out on the spot.
+local SIZES = process.args[8] == "on"
+local PASS_FILE = outPath .. ".pass.rbxm"
+local FIELDS = { { "s", "AbsoluteSize" }, { "p", "AbsolutePosition" }, { "c", "AbsoluteContentSize" },
+	{ "t", "TextBounds" }, { "cs", "AbsoluteCanvasSize" }, { "w", "AbsoluteWindowSize" } }
+local passes = { count = 0, settles = {}, changed = 0, seconds = 0, unresolved = 0 }
+
+-- Lune keeps a legacy `Font = Enum.Font.X` as an EnumItem it cannot save: as a FontFace.
+-- Roblox keeps whichever of the two was set last, which Lune does not record; UI
+-- libraries with defaults (Vide's) set a legacy Font before the story's FontFace, so a
+-- FontFace other than the default wins.
+local DEFAULT_FACE = roblox.Instance.new("TextLabel").FontFace
+local function fixFonts(root)
+	for _, instance in root:GetDescendants() do
+		if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+			local okFont, legacy = pcall(function()
+				return instance.Font -- (reading it fails unless a story set it)
+			end)
+			if okFont and nativeTypeof(legacy) == "EnumItem" and instance.FontFace == DEFAULT_FACE then
+				instance.FontFace = roblox.Font.fromEnum(legacy)
+			end
 		end
-		runService.RenderStepped:Fire(1 / 60)
-		runService.PreRender:Fire(1 / 60)
-		runService.Heartbeat:Fire(1 / 60)
-		task.wait()
 	end
+end
+
+-- Elements by the paths RHR's model reader gives them (rhr.ir.ensure_paths): the Name,
+-- or the ClassName when it is empty, and every sibling sharing one indexed from 1.
+-- Clone, which the pass saves through, leaves out what is not Archivable.
+local function pathIndex(root)
+	local byPath = {}
+	local function visit(children, parentPath)
+		local counts, seen, kept = {}, {}, {}
+		for _, child in children do
+			if child.Archivable then
+				local name = if child.Name ~= "" then child.Name else child.ClassName
+				counts[name] = (counts[name] or 0) + 1
+				table.insert(kept, { child, name })
+			end
+		end
+		for _, item in kept do
+			local child, segment = item[1], item[2]
+			if counts[segment] > 1 then
+				seen[segment] = (seen[segment] or 0) + 1
+				segment = `{segment}[{seen[segment]}]`
+			end
+			local here = if parentPath == "" then segment else `{parentPath}/{segment}`
+			byPath[here] = child
+			visit(child:GetChildren(), here)
+		end
+	end
+	visit({ root }, "")
+	return byPath
+end
+
+local function read(instance, property)
+	return instance[property]
+end
+local function layoutPass()
+	local began = os.clock()
+	local copy = screen:Clone()
+	fixFonts(copy)
+	local okSave, saveProblem = pcall(function()
+		fs.writeFile(PASS_FILE, roblox.serializeModel({ copy }))
+	end)
+	copy:Destroy()
+	if not okSave then
+		fail("could not save the screen for a layout pass: " .. tostring(saveProblem))
+	end
+	stdio.write(`RHR-PASS {PASS_FILE}\n`)
+	local okReply, reply = pcall(serde.decode, "json", stdio.readLine())
+	if not okReply then
+		fail("the layout pass got no answer: " .. tostring(reply))
+	end
+	local byPath = pathIndex(screen)
+	local changed = {}
+	for path, values in reply do
+		local instance = byPath[path]
+		if instance == nil then
+			passes.unresolved += 1
+			continue
+		end
+		for _, field in FIELDS do
+			local pair = values[field[1]]
+			if pair then
+				local value = roblox.Vector2.new(pair[1], pair[2])
+				local okRead, current = pcall(read, instance, field[2])
+				if (not okRead or current ~= value) and pcall(write, instance, field[2], value) then
+					table.insert(changed, { instance, field[2] })
+				end
+			end
+		end
+	end
+	for _, change in changed do
+		eventOf(change[1], "property:" .. change[2]):Fire()
+		eventOf(change[1], "Changed"):Fire(change[2])
+	end
+	passes.count += 1
+	passes.changed += #changed
+	passes.seconds += os.clock() - began
+	return #changed
+end
+
+-- Roblox works sizes out within the frame, so these passes have no Heartbeat between
+-- them: they go on while a pass changes a size or the threads it releases run.
+local SETTLE_PASSES = 8
+local function settle()
+	if not SIZES then
+		return
+	end
+	for count = 1, SETTLE_PASSES do
+		local changed = layoutPass()
+		if drain() == 0 and changed == 0 then
+			table.insert(passes.settles, count)
+			return
+		end
+	end
+	table.insert(passes.settles, SETTLE_PASSES)
+	stdio.ewrite(`sizes still changed after {SETTLE_PASSES} layout passes in a row: the story may resize what it measures\n`)
+end
+
+local runService = game:GetService("RunService")
+local function frame()
+	storyFrame += 1
+	local step = 1 / 60
+	for _, fn in renderSteps do
+		storyTask.spawn(fn, step)
+	end
+	runService.RenderStepped:Fire(step)
+	runService.PreRender:Fire(step)
+	drain()
+	if SIZES then
+		layoutPass()
+		drain()
+	end
+	wakeSleepers()
+	drain()
+	runService.Heartbeat:Fire(step)
+	drain()
 end
 
 local function controlDefaults(controls)
@@ -707,34 +973,50 @@ local function mount()
 	error("a story table needs react + reactRoblox, roact, vide, fusion, a render function or a story function")
 end
 
-local okMount, problem = xpcall(mount, function(err)
-	return tostring(err) .. "\n" .. debug.traceback("", 2)
+-- A story that waits while it mounts gets up to MOUNT_FRAMES frames of story time.
+local MOUNT_FRAMES = 300
+local mounted, mountProblem = false, nil
+storyTask.spawn(function()
+	local okMount, problem = xpcall(mount, function(err)
+		return tostring(err) .. "\n" .. debug.traceback("", 2)
+	end)
+	mounted, mountProblem = true, if okMount then nil else problem
 end)
-if not okMount then
-	fail(problem)
+if mountProblem then
+	fail(mountProblem)
 end
-frames(30)
-
--- Lune keeps a legacy `Font = Enum.Font.X` as an EnumItem it cannot save: as a FontFace.
--- Roblox keeps whichever of the two was set last, which Lune does not record; UI
--- libraries with defaults (Vide's) set a legacy Font before the story's FontFace, so a
--- FontFace other than the default wins.
-local DEFAULT_FACE = roblox.Instance.new("TextLabel").FontFace
-for _, instance in screen:GetDescendants() do
-	if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
-		local okFont, legacy = pcall(function()
-			return instance.Font -- (reading it fails unless a story set it)
-		end)
-		if okFont and nativeTypeof(legacy) == "EnumItem" and instance.FontFace == DEFAULT_FACE then
-			instance.FontFace = roblox.Font.fromEnum(legacy)
-		end
+settle()
+drain()
+for _ = 1, MOUNT_FRAMES do
+	if mounted then
+		break
 	end
+	frame()
 end
+if mountProblem then
+	fail(mountProblem)
+end
+if not mounted then
+	stdio.ewrite(`the story was still mounting after {MOUNT_FRAMES / 60} s of story time; saved what it had built\n`)
+end
+for _ = 1, 30 do
+	frame()
+end
+settle()
+
+fixFonts(screen)
 local okSave, saveProblem = pcall(function()
 	fs.writeFile(outPath, roblox.serializeModel({ screen }))
 end)
 if not okSave then
 	fail("could not save the UI the story built: " .. tostring(saveProblem))
+end
+if SIZES then
+	fs.removeFile(PASS_FILE)
+	if passes.unresolved > 0 then
+		stdio.ewrite(`{passes.unresolved} layout values named no element of the story's screen\n`)
+	end
+	print("RHR-SIZES " .. serde.encode("json", passes))
 end
 print(`ok {#screen:GetDescendants()}`)
 process.exit(0)

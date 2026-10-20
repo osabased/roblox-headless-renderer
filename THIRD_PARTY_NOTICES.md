@@ -41,6 +41,12 @@ metadata on redistribution.
 - Location: `src/rhr/vendor/three/` (version 0.186.0, from the npm package)
 - License: MIT, `src/rhr/vendor/three/LICENSE`
 
+## Vide (test fixture)
+
+- Location: `tests/fixtures/rojo_sizes/Packages/vide/` (version 0.4.1, from
+  https://github.com/centau/vide), used by the story tests only; not in the package
+- License: MIT, `tests/fixtures/rojo_sizes/Packages/vide/LICENSE.md`
+
 ## Left out on purpose
 
 - `RobloxEmoji.ttf`: upstream bundles a generated private-use-area font whose

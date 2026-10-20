@@ -660,24 +660,58 @@ Roblox answers these, but RHR still raises "not a valid member" because Lune can
 create an InputObject: `UserInputService:GetDeviceAcceleration`, `GetDeviceGravity`,
 `GetDeviceRotation` and `GetGamepadState`.
 
-**Story-time layout reads.** RHR lays the UI out after the story ran, so while it runs
-what Roblox works out in layout reads as Studio read it for a new element on
-2026-10-19, before layout: AbsoluteSize, AbsolutePosition and AbsoluteRotation zero;
-GuiState Idle; TextBounds zero and OpenTypeFeaturesError `""`; a TextBox's
-CursorPosition 1 and SelectionStart -1; a ScrollingFrame's AbsoluteCanvasSize and
-AbsoluteWindowSize, a layout's AbsoluteContentSize and a UIGridLayout's
-AbsoluteCellCount zero; a BillboardGui's CurrentDistance and DistanceStep 0; a
-VideoFrame's IsLoaded false, Resolution zero and TimeLength 0. TextFits and an
-ImageLabel's or ImageButton's IsLoaded read true, where Studio reads false until it
-has laid the text out or loaded the image, so code that shrinks text until it fits, or
-waits for an image, goes on. None of them changes while the story runs, and no change
-signal fires for them. The story's target and its ScreenGui have the area's size, and
-AbsolutePosition 0, 0: Roblox measures it from the area's corner. Studio works some
-of them out as soon as it can, even outside the game, where RHR reads zero: an
-element's AbsoluteSize once its Size is set in offsets; the AbsoluteSize of a
-ScreenGui or SurfaceGui the story makes, 800, 600 outside the game; a new
-UIGridLayout's AbsoluteCellSize, its CellSize of 100, 100; and a layout's
-AbsoluteContentSize in a ScreenGui that is not parented.
+**Story time.** A story runs on story time, frame k at k/60 s: `task.wait`, `delay`,
+`defer`, `spawn` and `cancel`, the global `wait`, `delay` and `spawn`, `os.clock`,
+`tick`, `time` and `elapsedTime` follow it, so a timer fires on the frame it would at
+60 fps however long RHR takes over a frame (a `task.delay(0.25)` on frame 15). RHR
+runs frames until the story has mounted (at most 300) and 30 more. `os.time` and
+`DateTime` read the machine's clock.
+
+**Story-time layout reads.** While a story runs, RHR lays its screen out with the
+render's own layout (rhr.story_sizes) and writes what Roblox works out: AbsoluteSize;
+AbsolutePosition, from the area's corner as Roblox measures it; TextBounds; a
+UIListLayout's, UIGridLayout's, UIPageLayout's or UITableLayout's AbsoluteContentSize,
+the padding between its items included; and a ScrollingFrame's AbsoluteCanvasSize and
+AbsoluteWindowSize. Each value that changed fires its GetPropertyChangedSignal and
+Changed. It lays out after the story mounts and again while a layout changes a size
+or wakes a thread (8 times at most, then it warns that the story may resize what it
+measures), once a frame between PreRender and Heartbeat, and before it saves the
+screen. So a read from one of those signals, from `task.defer` or on a later frame
+gets the size the picture is drawn at; the story fixtures in
+`tests/fixtures/rojo_sizes/` read Studio's numbers, exactly. TextBounds is as wide as
+RHR draws the text, so the Text section's widths apply: the fixture's FredokaOne
+line, a face RHR has Studio's advances for, reads Studio's 176 px; the same line in
+Montserrat at TextSize 18 reads 175 px, where Studio reads 179.
+
+What it does not serve:
+
+- A read in the same resumption that created or parented the element. Roblox lays it
+  out on the spot; RHR has not laid it out yet, so it reads zero, or the last layout's
+  value for an element that was already there. A RenderStepped or PreRender handler
+  reads the frame before's layout.
+- Elements outside the story's screen: a ScreenGui the story makes, an element not
+  yet parented. They read as before layout.
+- Text with RichText markup is measured as its plain text at its TextSize, so bold or
+  sized runs, and TextScaled rich text, read off. Plain text is measured as it is
+  drawn (TextScaled, wrapping, UIScale), in the face RHR draws it in; in a face RHR
+  stands in for, the stand-in's width.
+- These read as Studio read them for a new element on 2026-10-19, before layout:
+  AbsoluteRotation zero; GuiState Idle; OpenTypeFeaturesError `""`; a TextBox's
+  CursorPosition 1 and SelectionStart -1; a UIGridLayout's AbsoluteCellSize and
+  AbsoluteCellCount zero; a BillboardGui's CurrentDistance and DistanceStep 0; a
+  VideoFrame's IsLoaded false, Resolution zero and TimeLength 0. TextFits and an
+  ImageLabel's or ImageButton's IsLoaded read true, where Studio reads false until it
+  has laid the text out or loaded the image, so code that shrinks text until it fits,
+  or waits for an image, goes on.
+
+The story's target and its ScreenGui have the area's size, and AbsolutePosition 0, 0,
+from before the story mounts. `RHR_STORY_SIZES=0` runs stories without layout: every
+read above stays zero, apart from the target and its ScreenGui. Studio works some of
+them out before layout, where RHR reads zero until its first: an element's
+AbsoluteSize once its Size is set in offsets; the AbsoluteSize of a ScreenGui or
+SurfaceGui the story makes, 800, 600 outside the game; a new UIGridLayout's
+AbsoluteCellSize, its CellSize of 100, 100; and a layout's AbsoluteContentSize in a
+ScreenGui that is not parented.
 
 Still errors in a story: `ContentText`, which Roblox works out as Text is set; a
 ViewportFrame's `CurrentCamera`, which Lune reads as Workspace's member (setting a
