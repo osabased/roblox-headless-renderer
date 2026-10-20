@@ -677,11 +677,16 @@ Changed. It lays out after the story mounts and again while a layout changes a s
 or wakes a thread (8 times at most, then it warns that the story may resize what it
 measures), once a frame between PreRender and Heartbeat, and before it saves the
 screen. So a read from one of those signals, from `task.defer` or on a later frame
-gets the size the picture is drawn at; the story fixtures in
-`tests/fixtures/rojo_sizes/` read Studio's numbers, exactly. TextBounds is as wide as
-RHR draws the text, so the Text section's widths apply: the fixture's FredokaOne
-line, a face RHR has Studio's advances for, reads Studio's 176 px; the same line in
-Montserrat at TextSize 18 reads 175 px, where Studio reads 179.
+gets the size the picture is drawn at. The story fixtures in
+`tests/fixtures/rojo_sizes/` read Studio's numbers for AbsoluteSize, AbsolutePosition,
+TextBounds and a UIListLayout's AbsoluteContentSize; on a phone area they compare only
+positions measured from the target, since where Roblox puts the target on a phone's
+screen is not settled. No fixture compares the other layouts' AbsoluteContentSize, or
+a ScrollingFrame's AbsoluteCanvasSize and AbsoluteWindowSize, with Studio; they come
+from the same layout. TextBounds is as wide as RHR draws the text, so the Text
+section's widths apply: the fixture's FredokaOne line, a face RHR has Studio's
+advances for, reads Studio's 176 px; the same line in Montserrat at TextSize 18 reads
+175 px, where Studio reads 179.
 
 What it does not serve:
 
