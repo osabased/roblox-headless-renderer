@@ -357,11 +357,16 @@ return function(hooks)
 	local now, event, changed, spawn, inGame = hooks.now, hooks.event, hooks.changed, hooks.spawn, hooks.inGame
 
 	local states = setmetatable({}, { __mode = "k" }) -- Tween instance -> its state
-	local owners = setmetatable({}, { __mode = "k" }) -- instance -> property -> the state that writes it
+	-- instance -> property -> the state that writes it, apart for Tweens and legacy
+	-- tweens: a Tween and a legacy tween on one property both play to the end
+	-- (semantics.json: LT, TL).
+	local tweenOwners = setmetatable({}, { __mode = "k" })
+	local legacyOwners = setmetatable({}, { __mode = "k" })
 	local legacySlots = setmetatable({}, { __mode = "k" }) -- GuiObject -> its legacy tween
 	-- Playing, waiting or paused, in the order played. Roblox keeps legacy GuiObject tweens
-	-- apart from Tweens (semantics.json).
+	-- apart from Tweens and steps them first, so a Tween's write lands last (semantics.json).
 	local tweenQueue, legacyQueue = {}, {}
+	local queues = { legacyQueue, tweenQueue }
 
 	-- A destroyed Tween plays on in Roblox, with nothing left connected to its Completed
 	-- (semantics.json); Lune refuses writes to it.
@@ -381,9 +386,9 @@ return function(hooks)
 		end
 	end
 
-	-- A tween that ends leaves its place to the last in its queue, as Roblox's does, so once
-	-- one has ended the order tweens step and fire Completed in is no longer the play order
-	-- (semantics.json).
+	-- A Tween that ends leaves its place to the last in its queue, as Roblox's does, so once
+	-- one has ended the order Tweens step and fire Completed in is no longer the play order
+	-- (semantics.json). Legacy tweens keep theirs.
 	local function retire(state)
 		local queue = state.queue
 		local index = table.find(queue, state)
@@ -414,7 +419,7 @@ return function(hooks)
 		end
 	end
 	local function finish(state, status)
-		if status == "Completed" then
+		if status == "Completed" and state.queue == tweenQueue then
 			retire(state)
 		else
 			deactivate(state)
@@ -427,7 +432,7 @@ return function(hooks)
 	-- exactly.
 	local function write(state, alpha, ending)
 		local instance = state.instance
-		local claims = owners[instance]
+		local claims = state.owners[instance]
 		for _, goal in state.goals do
 			local property = goal.property
 			if claims[property] ~= state then
@@ -464,7 +469,7 @@ return function(hooks)
 		if #state.goals == 0 then
 			return true
 		end
-		local claims = owners[state.instance]
+		local claims = state.owners[state.instance]
 		for _, goal in state.goals do
 			if claims[goal.property] == state then
 				return true
@@ -474,10 +479,10 @@ return function(hooks)
 	end
 
 	local function claim(state)
-		local claims = owners[state.instance]
+		local claims = state.owners[state.instance]
 		if not claims then
 			claims = {}
-			owners[state.instance] = claims
+			state.owners[state.instance] = claims
 		end
 		for _, goal in state.goals do
 			claims[goal.property] = state
@@ -540,25 +545,29 @@ return function(hooks)
 	end
 
 	-- A tween that a newer one took every property from is cancelled on the next step,
-	-- the first played first, before any tween moves. Then they move from the end of each
-	-- queue, which is the order Roblox fires their Completed in; one that ends takes the
-	-- last in the queue, already stepped, into its place.
+	-- the first played first, before any tween moves. Then legacy tweens move in the order
+	-- played, and Tweens from the end of their queue: the orders Roblox runs callbacks and
+	-- fires Completed in. A Tween that ends takes the last in the queue, already stepped,
+	-- into its place.
 	local function stepAll()
 		local t = now()
 		announcements = {}
-		for _, queue in { tweenQueue, legacyQueue } do
+		for _, queue in queues do
 			for _, state in table.clone(queue) do
 				if not owns(state) then
 					finish(state, "Cancelled")
 				end
 			end
 		end
-		for _, queue in { tweenQueue, legacyQueue } do
-			for index = #queue, 1, -1 do
-				local state = queue[index]
-				if state.status == "Playing" or state.status == "Delayed" then
-					step(state, t)
-				end
+		for _, state in table.clone(legacyQueue) do
+			if state.status == "Playing" then
+				step(state, t)
+			end
+		end
+		for index = #tweenQueue, 1, -1 do
+			local state = tweenQueue[index]
+			if state.status == "Playing" or state.status == "Delayed" then
+				step(state, t)
 			end
 		end
 		local due = announcements
@@ -643,6 +652,7 @@ return function(hooks)
 			end,
 			offset = roundedOffset,
 			queue = tweenQueue,
+			owners = tweenOwners,
 		}
 		states[tween] = state
 		setStatus(state, "Begin")
@@ -718,6 +728,7 @@ return function(hooks)
 			offset = truncatedOffset,
 			callback = if type(callback) == "function" then callback else nil,
 			queue = legacyQueue,
+			owners = legacyOwners,
 		}
 		legacySlots[instance] = state
 		begin(state, true)
@@ -746,14 +757,14 @@ return function(hooks)
 
 	local function moving()
 		local list = {}
-		for _, queue in { tweenQueue, legacyQueue } do
+		for _, queue in queues do
 			for _, state in queue do
 				if state.status == "Paused" then
 					continue
 				end
 				local properties = {}
 				for _, goal in state.goals do
-					if owners[state.instance][goal.property] == state then
+					if state.owners[state.instance][goal.property] == state then
 						table.insert(properties, goal.property)
 					end
 				end
