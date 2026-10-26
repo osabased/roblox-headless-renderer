@@ -388,7 +388,8 @@ return function(hooks)
 
 	-- A Tween that ends leaves its place to the last in its queue, as Roblox's does, so once
 	-- one has ended the order Tweens step and fire Completed in is no longer the play order
-	-- (semantics.json). Legacy tweens keep theirs.
+	-- (semantics.json). Legacy tweens keep theirs: no recorded legacy tween ends before one
+	-- called after it, so the recordings cannot tell.
 	local function retire(state)
 		local queue = state.queue
 		local index = table.find(queue, state)
