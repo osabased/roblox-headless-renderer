@@ -38,15 +38,17 @@
   forever), reverses and a later tween taking a property over. Measured against Studio
   0.744 (tests/test_tween.py, recordings in tests/fixtures/tween/): GetValue for all
   11 styles and 3 directions within 4.2e-7, where it returned the alpha unchanged; 14
-  tweens and 5 legacy ones sampled every frame for 4.5 s in a client, and 43 tweens
-  and 4 legacy ones in edge cases (Pause, Cancel and Play during a delay or after
+  tweens and 5 legacy ones sampled every frame for 4.5 s in a client, and 47 tweens
+  and 8 legacy ones in edge cases (Pause, Cancel and Play during a delay or after
   completing, takeovers of a playing and a paused tween, a destroyed tween, an empty
-  goal table, a fractional goal for a whole-number property, a legacy tween and a
-  Tween on one property, a property set after Play or during a delay) for 1.3 s on
-  the Server, read
-  Studio's values (pixel offsets within 0.5 px, the rest within 1e-3) and
-  PlaybackState on every frame, and fire Completed and the legacy callbacks within
-  2 ms of Studio and in its order.
+  goal table, fractional goals for 32- and 64-bit whole-number properties, a legacy
+  tween and a Tween on one property, legacy tweens that end on one step, a property
+  set after Play, during a delay or on the step a delay ends) for 1.3 s on the
+  Server, read Studio's values (pixel offsets within 0.5 px, the rest within 1e-3)
+  and PlaybackState on every frame, and fire Completed and the legacy callbacks
+  within 2 ms of Studio and in its order, apart from three legacy tweens that end
+  together, two with a Tween on the same frame, whose callbacks run in an order
+  Studio's did not (docs/known-approximations.md).
 - **`--story-time T`** saves a story T seconds in (0 to 60; 0 is the mount), so a
   run of T values samples an animation. The story cache keys on it. On a file that is
   not a story it exits 2.
@@ -61,6 +63,15 @@
   keeps the last answer**, since layout reads none of them. The 900-label story with
   a spinner took 110 s to reach the 5 s cap without this, and laid its screen out 303
   times; it now lays it out once.
+
+### Fixed
+
+- **A story's cache entry is remade when any of RHR's code changes**, where it keyed
+  on the two Luau runtime files and the installed version. A story reads the layout
+  RHR's Python works out, so an edit there changed what the story builds while the
+  cache kept the old result.
+
+## 1.0.0rc1+osabased.14 (fork)
 
 1.0.0rc1+osabased.13 with these fixes.
 
