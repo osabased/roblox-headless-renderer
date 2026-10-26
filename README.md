@@ -121,7 +121,9 @@ each one, is [`docs/AGENTS.md`](https://github.com/TabooHarmony/roblox-headless-
   guessing quietly. Here's [what's approximated](https://github.com/TabooHarmony/roblox-headless-renderer/blob/main/docs/known-approximations.md).
 - **It doesn't run your game.** Scripts, physics and animation don't run, so you see
   files as they're saved. (Effects are the exception: `rhr` plays common VFX setups
-  itself and shows them at their fullest moment.)
+  itself and shows them at their fullest moment. So are stories: a story's code runs
+  and its tweens play, and `rhr` shows the UI once it has settled, or at
+  `--story-time T`.)
 
 ## Details
 

@@ -119,9 +119,16 @@ thread or a later frame. A read in the same resumption that parented the element
 reads zero, where Roblox lays it out on the spot; read it from a signal or
 `task.defer` instead. TextFits and an image's IsLoaded are true, so code that waits
 for them goes on. TextService's GetTextSize and GetTextBoundsAsync are rough
-estimates. Tweens end at their goal; controls take their defaults; nothing is
-clicked. `RHR_STORY_SIZES=0` runs stories without layout, every such read zero. A
-story that fails exits 2 with the error pointed at your files and lines.
+estimates. Tweens play on story time as Roblox plays them (TweenService and the
+GuiObject TweenPosition, TweenSize and TweenSizeAndPosition), and RHR saves the UI once
+it has settled: its screen unchanged for 10 frames, no tween playing or waiting out a
+delay and no timer due before 5 s, at least 30 frames after it mounts and at most 5 s
+of story time in. At 5 s the log names what was still moving (`still moving at 5 s of
+story time ...`) and the timers still waiting, with the file and line that set them.
+`--story-time T` saves it T seconds in instead, mid-tween. Controls take
+their defaults; nothing is clicked. `RHR_STORY_SIZES=0` runs stories without layout,
+every such read zero. A story that fails exits 2 with the error pointed at your files
+and lines.
 
 ## How far to trust the output
 
