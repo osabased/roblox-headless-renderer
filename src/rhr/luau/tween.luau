@@ -459,7 +459,11 @@ return function(hooks)
 		end
 	end
 
+	-- A tween with no goals plays out its time all the same (semantics.json: EMP).
 	local function owns(state)
+		if #state.goals == 0 then
+			return true
+		end
 		local claims = owners[state.instance]
 		for _, goal in state.goals do
 			if claims[goal.property] == state then
