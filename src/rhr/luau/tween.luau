@@ -491,16 +491,26 @@ return function(hooks)
 		table.insert(state.queue, state)
 	end
 
-	local function begin(state, firstPlay)
-		state.start = {}
+	local function readStart(state)
+		local start = {}
 		for _, goal in state.goals do
 			local okRead, value = pcall(function()
 				return state.instance[goal.property]
 			end)
-			state.start[goal.property] = if okRead
+			start[goal.property] = if okRead
 				then value
 				else UNSET_DEFAULTS[state.instance.ClassName .. "." .. goal.property] or goal.value
 		end
+		return start
+	end
+
+	-- A legacy tween reads where it starts from when it is called. A Tween reads it when
+	-- its curve first starts, on its first step or on the step its delay ends, so what is
+	-- set after Play or during the delay is where it starts; its repeats start there too
+	-- (semantics.json: LG, SN, SD, SR, and LT and TL, whose Tweens start where the legacy
+	-- tweens' first step left them).
+	local function begin(state, firstPlay)
+		state.start = if state.tween then nil else readStart(state)
 		state.count = 0
 		state.phaseStart = now()
 		state.waiting = state.delay > 0
@@ -518,10 +528,12 @@ return function(hooks)
 			if elapsed + EPSILON >= state.delay then
 				state.waiting = false
 				state.phaseStart = t
+				state.start = state.start or readStart(state)
 				setStatus(state, "Playing")
 			end
 			return
 		end
+		state.start = state.start or readStart(state)
 		local cycle = state.time * (if state.reverses then 2 else 1)
 		if elapsed + EPSILON >= cycle then
 			write(state, if state.reverses then 0 else 1, true)
