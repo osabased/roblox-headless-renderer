@@ -697,25 +697,26 @@ Studio 0.744 on 2026-10-26 (tests/test_tween.py, the recordings in
   a property set after Play, during a delay, on the step a delay ends or before a
   repeat. Each read Studio's values (pixel offsets within 0.5 px, the rest within
   1e-3) and PlaybackState on every frame, and fired Completed and the legacy callbacks
-  within 2 ms of Studio and in its order, apart from legacy callbacks on one step
-  (below).
+  within 2 ms of Studio and in its order, apart from three legacy callbacks on one
+  step (below).
   Numbers, whole numbers, booleans, UDim, UDim2, Vector2, Vector3, CFrame, Color3 and
   Rect tween as Studio's do; the errors and TweenInfo's defaults read as Studio's.
 - Tweens step from the last one played to the first, one that completes gives its
   place to the last one, and a paused one played again goes to the end, so after a
   completion or a resume they step, and fire Completed, out of play order. RHR's model
-  fits both recordings; Roblox does not document it.
+  fits both recordings; Roblox does not document it. Legacy tweens are kept the same
+  way, apart from Tweens: four on one frame each, the first ending early, ran the
+  other three's callbacks in the order this gives.
 - A Tween reads where it starts on the first step it writes: its first step, or the
   step after its delay ends (on the step the delay ends it reads Playing and writes
   nothing). So a property set after Play, during the delay or on the step the delay
   ends is where it starts; its repeats start there again, whatever was set in
   between. A legacy tween reads where it starts when it is called.
 - A legacy tween and a Tween on one property both play to their ends. Legacy tweens
-  step first, so the Tween's value is the one drawn. RHR runs the callbacks of legacy
-  tweens that end on one step in the order they were called. Roblox runs them in an
-  order that neither the call order nor a queue kept Tweens' way gives, and two
-  recordings of the same calls (LB, LT and TL) ran them in different orders, so the
-  test compares those callbacks by name.
+  step first, so the Tween's value is the one drawn. Three legacy tweens that end
+  together, two with a Tween on the same frame (LB, LT and TL), ran their callbacks
+  in an order RHR's queue does not give, and in different orders in two recordings
+  (the second had more tweens playing), so the test compares those three by name.
 - A tween with no goals plays out its time and completes. A fractional goal for a
   whole-number property, 32- or 64-bit, drops its fraction when the tween is created
   (2.7 tweens to 2, -2.5 to -2), and each value on the way is rounded. Setting

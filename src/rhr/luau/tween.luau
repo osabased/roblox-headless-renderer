@@ -385,12 +385,11 @@ return function(hooks)
 		end
 	end
 
-	-- A Tween that ends leaves its place to the last in its queue, as Roblox's does, so once
-	-- one has ended the order Tweens step and fire Completed in is no longer the play order
-	-- (semantics.json). Legacy tweens keep theirs: Roblox runs the callbacks of legacy
-	-- tweens that end on one step in an order that neither the call order nor a queue kept
-	-- Tweens' way gives (semantics.json: LQ2 to LQ4, LB, LT, TL), so these run in the order
-	-- called.
+	-- A tween that ends leaves its place to the last in its queue, as Roblox's does, so once
+	-- one has ended the order tweens step, fire Completed and run callbacks in is no longer
+	-- the play order (semantics.json: LQ1 to LQ4). Three legacy tweens that end together,
+	-- two with a Tween on the same frame, ran their callbacks in an order this does not
+	-- give, and not the same one in two recordings (semantics.json: LB, LT, TL).
 	local function retire(state)
 		local queue = state.queue
 		local index = table.find(queue, state)
@@ -421,7 +420,7 @@ return function(hooks)
 		end
 	end
 	local function finish(state, status)
-		if status == "Completed" and state.queue == tweenQueue then
+		if status == "Completed" then
 			retire(state)
 		else
 			deactivate(state)
@@ -559,10 +558,9 @@ return function(hooks)
 	end
 
 	-- A tween that a newer one took every property from is cancelled on the next step,
-	-- the first played first, before any tween moves. Then legacy tweens move in the order
-	-- played, and Tweens from the end of their queue: the orders Roblox runs callbacks and
-	-- fires Completed in. A Tween that ends takes the last in the queue, already stepped,
-	-- into its place.
+	-- the first played first, before any tween moves. Then legacy tweens move, then Tweens,
+	-- each from the end of its queue: the order Roblox runs callbacks and fires Completed
+	-- in. A tween that ends takes the last in its queue, already stepped, into its place.
 	local function stepAll()
 		local t = now()
 		announcements = {}
@@ -573,15 +571,12 @@ return function(hooks)
 				end
 			end
 		end
-		for _, state in table.clone(legacyQueue) do
-			if state.status == "Playing" then
-				step(state, t)
-			end
-		end
-		for index = #tweenQueue, 1, -1 do
-			local state = tweenQueue[index]
-			if state.status == "Playing" or state.status == "Delayed" then
-				step(state, t)
+		for _, queue in queues do
+			for index = #queue, 1, -1 do
+				local state = queue[index]
+				if state.status == "Playing" or state.status == "Delayed" then
+					step(state, t)
+				end
 			end
 		end
 		local due = announcements

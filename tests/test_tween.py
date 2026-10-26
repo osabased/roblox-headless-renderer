@@ -216,14 +216,18 @@ def compare_run(label: str, studio: dict, rhr: dict, shifted: list[dict]) -> Non
             problems.append(", ".join(issues))
     summary(f"{label} Completed: when, and the values it reads", problems, len(studio["completions"]))
 
-    # Roblox runs the callbacks of legacy tweens that end on one step in an order no
-    # queue of the calls gives (semantics.json: LQ2 to LQ4, and LB, LT, TL), so those
-    # compare by name.
-    def by_time(callbacks: list[dict]) -> list[dict]:
-        return sorted(callbacks, key=lambda c: (c["e"], c["callback"]))
+    # Three legacy tweens that end together, two with a Tween on the same frame, ran
+    # their callbacks in an order RHR does not give, and not the same one in two
+    # recordings (semantics.json: LB, LT, TL), so those three compare by name.
+    def in_order(callbacks: list[dict]) -> list[dict]:
+        out = list(callbacks)
+        for i in range(len(out) - 2):
+            if {c["callback"] for c in out[i:i + 3]} == {"LB", "LT", "TL"}:
+                out[i:i + 3] = sorted(out[i:i + 3], key=lambda c: c["callback"])
+        return out
 
-    want = by_time(studio.get("callbacks", []))
-    got = by_time(rhr["callbacks"])
+    want = in_order(studio.get("callbacks", []))
+    got = in_order(rhr["callbacks"])
     check([(c["callback"], c["status"]) for c in got] == [(c["callback"], c["status"]) for c in want]
           and all(abs(g["e"] - w["e"]) <= 2e-3 for g, w in zip(got, want)),
           f"{label} legacy callbacks {[(c['callback'], c['status'], round(c['e'], 4)) for c in got]} == Studio's "
@@ -257,6 +261,9 @@ def compare_setters(label: str, studio: list, rhr: list) -> None:
 
 def compare_semantics(studio: dict, rhr: dict, shifted: list[dict]) -> None:
     compare_run("semantics", studio, rhr, shifted)
+    check(len(rhr["errors"]) == len(studio["errors"]) and len(rhr["infos"]) == len(studio["infos"]),
+          f"semantics: the replay runs every error and TweenInfo case: {len(rhr['errors'])} of "
+          f"{len(studio['errors'])}, {len(rhr['infos'])} of {len(studio['infos'])}")
     for want, got in zip(studio["errors"], rhr["errors"]):
         same = got.get("ok") == want["ok"] and got.get("error") == want.get("error")
         check(same, f"error for {want['case']}: {got.get('error')!r}"
@@ -294,8 +301,8 @@ def label(found: dict[str, dict], name: str) -> str | None:
 
 
 def stories() -> None:
-    # The checks read what a run logs (what is still moving, its layout passes, the
-    # timers left waiting), and a story reused from the cache logs none of it.
+    # A story reused from the cache does not log its layout passes, which the checks
+    # count, so these run afresh.
     from rhr.paths import IR_DIR
 
     for saved in (IR_DIR / "stories").glob("*/*.story.rbxm"):
