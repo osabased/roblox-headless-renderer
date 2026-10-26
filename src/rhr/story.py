@@ -204,7 +204,8 @@ def _motion(stdout: str, files: dict[str, str], root: Path) -> tuple[str, list[s
     when = f"at {time:g} s of story time, captured there"
     problems = []
     if named:
-        shown = [f"{path} {', '.join(properties)}" + (" (repeats forever)" if path in forever else "")
+        shown = [f"{path} {', '.join(properties) or '(a tween with no goals)'}"
+                 + (" (repeats forever)" if path in forever else "")
                  for path, properties in sorted(named.items())]
         more = f" and {len(shown) - 8} more" if len(shown) > 8 else ""
         problems.append(_point_at_files(f"still moving {when}: {'; '.join(shown[:8])}{more}", files, root))
