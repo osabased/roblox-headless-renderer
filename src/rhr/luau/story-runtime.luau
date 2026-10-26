@@ -812,6 +812,18 @@ end
 local function read(instance, property)
 	return instance[property]
 end
+local function sameList(a, b)
+	if b == nil or #a ~= #b then
+		return false
+	end
+	for index, item in a do
+		if item ~= b[index] then
+			return false
+		end
+	end
+	return true
+end
+local lastAnswer = { line = nil, members = nil, unresolved = 0 }
 local function layoutPass()
 	local began = os.clock()
 	local copy = screen:Clone()
@@ -825,16 +837,26 @@ local function layoutPass()
 		fail("could not save the screen for a layout pass: " .. tostring(saveProblem))
 	end
 	stdio.write(`RHR-PASS {PASS_FILE}\n`)
-	local okReply, reply = pcall(serde.decode, "json", stdio.readLine())
+	local line = stdio.readLine()
+	-- The last answer again, for the same elements: what the last pass wrote stands.
+	-- A big screen with a spinner gets this every frame.
+	local members = screen:GetDescendants()
+	if line == lastAnswer.line and sameList(members, lastAnswer.members) then
+		passes.count += 1
+		passes.unresolved += lastAnswer.unresolved
+		passes.seconds += os.clock() - began
+		return 0
+	end
+	local okReply, reply = pcall(serde.decode, "json", line)
 	if not okReply then
 		fail("the layout pass got no answer: " .. tostring(reply))
 	end
 	local byPath = pathIndex(screen)
-	local changed = {}
+	local changed, unresolved = {}, 0
 	for path, values in reply do
 		local instance = byPath[path]
 		if instance == nil then
-			passes.unresolved += 1
+			unresolved += 1
 			continue
 		end
 		for _, field in FIELDS do
@@ -852,7 +874,9 @@ local function layoutPass()
 		eventOf(change[1], "property:" .. change[2]):Fire()
 		eventOf(change[1], "Changed"):Fire(change[2])
 	end
+	lastAnswer = { line = line, members = members, unresolved = unresolved }
 	passes.count += 1
+	passes.unresolved += unresolved
 	passes.changed += #changed
 	passes.seconds += os.clock() - began
 	return #changed

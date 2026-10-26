@@ -289,7 +289,7 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
                                  "problems": problems.splitlines()}), encoding="utf-8")
     if log is not None:
         log(f"story  {story.name}: ran it in its Rojo project, {count} instances built" + (
-            f", {passes.count} layout passes ({passes.skipped} on an unchanged screen) in {passes.seconds:.2f} s"
+            f", {passes.count} layout passes ({passes.skipped} with nothing new to lay out) in {passes.seconds:.2f} s"
             if passes is not None else "") + (f", {saved}" if saved else ""))
         for line in problems.splitlines()[:10]:
             log(f"story  {line}")
