@@ -2,12 +2,13 @@
 -- tween that takes over every property of a playing or paused one, Pause, Cancel and
 -- Play while a tween waits out its delay, has not started or has completed, replays,
 -- a destroyed tween, a negative Time, RepeatCount -2, value types beyond the GUI ones,
--- whole-number properties and a fractional goal for one, GuiObject.Transparency,
--- setters that clamp an overshoot, booleans on curves that leave 0..1, an empty goal
--- table, zero-Time repeats, Pause and Play in one frame, a legacy tween and a Tween on
--- one property each way round, a property set after Play, during a delay or before a
--- repeat, what Create, TweenInfo.new and the legacy tweens refuse, and a legacy
--- tween's callback when an override is refused.
+-- whole-number properties and a fractional goal for one (32- and 64-bit),
+-- GuiObject.Transparency, setters that clamp an overshoot, booleans on curves that
+-- leave 0..1, an empty goal table, zero-Time repeats, Pause and Play in one frame, a
+-- legacy tween and a Tween on one property each way round, a property set after Play,
+-- during a delay, before a repeat or on every frame across a delay's end, a legacy
+-- tween that ends before those called after it, what Create, TweenInfo.new and the
+-- legacy tweens refuse, and a legacy tween's callback when an override is refused.
 --
 -- Run it in Studio Play mode on the Server datamodel through the Studio MCP's
 -- execute_luau (a client's tweens step only while its viewport renders). The JSON is
@@ -238,6 +239,21 @@ local SR = new("NumberValue")
 create("SR", SR, TweenInfo.new(0.2, Style.Linear, Direction.In, 1, false, 0.2), { Value = 100 })
 track("SR.Value", SR, "Value")
 
+-- A fractional goal for a 64-bit whole number, each side of a half. Create may refuse
+-- one, so a refusal leaves its track out rather than ending the recording.
+for _, case in { { "I64A", 2.7 }, { "I64B", -2.5 }, { "I64C", 2.5 } } do
+	local value = new("IntValue")
+	if pcall(create, case[1], value, linear(0.6), { Value = case[2] }) then
+		track(case[1] .. ".Value", value, "Value")
+	end
+end
+
+-- Heartbeat writes the sample count into DC after each sample, so the value its tween
+-- starts from names the step it read it on: the step its delay ends, or the next.
+local DC = new("NumberValue")
+create("DC", DC, linear(100, 0.2), { Value = -1000 })
+track("DC.Value", DC, "Value")
+
 local LB = new("Frame", { Position = UDim2.new() })
 track("LB.Position", LB, "Position")
 local LT = new("Frame", { Position = UDim2.new() })
@@ -246,6 +262,12 @@ local TL = new("Frame", { Position = UDim2.new() })
 track("TL.Position", TL, "Position")
 local LG = new("Frame", { Position = UDim2.new() })
 track("LG.Position", LG, "Position")
+-- The first called ends first; the other three end on one frame, so the order of their
+-- callbacks tells where the first one's place in the queue went.
+local LQ = {}
+for i = 1, 4 do
+	LQ[i] = new("Frame", { Position = UDim2.new() })
+end
 local function callback(name)
 	return function(status)
 		callbacks[#callbacks + 1] = { callback = name, status = status.Name, e = mainProbe.Value }
@@ -264,6 +286,10 @@ create("LTS", LT, linear(1), { Position = UDim2.fromOffset(0, 100) }):Play()
 create("TLS", TL, linear(1), { Position = UDim2.fromOffset(0, 100) }):Play()
 TL:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 1, false, callback("TL"))
 LG:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 0.5, false, callback("LG"))
+for i, frame in LQ do
+	frame:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, if i == 1 then 0.1 else 0.4, false,
+		callback(`LQ{i}`))
+end
 SN.Value = 40
 LG.Position = UDim2.fromOffset(0, 40)
 
@@ -278,6 +304,7 @@ for _, case in {
 	{ "Bezier", function() TweenInfo.new(1, Style.Bezier) end },
 	{ "GetValue Spring", function() TweenService:GetValue(0.5, Style.Spring, Direction.In) end },
 	{ "legacy tween outside the data model", function() Instance.new("Frame"):TweenPosition(UDim2.new()) end },
+	{ "fractional int64 goal", function() TweenService:Create(new("IntValue"), linear(1), { Value = 2.5 }) end },
 } do
 	local ok, problem = pcall(case[2])
 	errors[#errors + 1] = { case = case[1], ok = ok, error = if ok then nil else tostring(problem) }
@@ -434,6 +461,7 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 		probes[name] = value.Value
 	end
 	samples[#samples + 1] = { e = e, dt = dt, values = values, states = states, probes = probes }
+	DC.Value = #samples
 	if e >= RECORD_S then
 		done = true
 	end
@@ -459,6 +487,11 @@ local json = HttpService:JSONEncode({
 	infos = infos,
 	setters = setters,
 })
+-- A second run in one Play would otherwise leave the first run's chunks found first.
+local stale = ReplicatedStorage:FindFirstChild("RHRTweenSemanticsOut")
+if stale then
+	stale:Destroy()
+end
 local out = Instance.new("Folder")
 out.Name = "RHRTweenSemanticsOut"
 local count = 0

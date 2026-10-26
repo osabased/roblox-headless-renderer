@@ -304,7 +304,6 @@ local SETTERS = {
 	{ TEXT, "MaxVisibleGraphemes", function(v)
 		return math.max(v, -1)
 	end },
-	{ { "IntValue" }, "Value", roundAway },
 }
 local setterCache = {}
 local function setterFor(instance, property)
@@ -388,8 +387,10 @@ return function(hooks)
 
 	-- A Tween that ends leaves its place to the last in its queue, as Roblox's does, so once
 	-- one has ended the order Tweens step and fire Completed in is no longer the play order
-	-- (semantics.json). Legacy tweens keep theirs: no recorded legacy tween ends before one
-	-- called after it, so the recordings cannot tell.
+	-- (semantics.json). Legacy tweens keep theirs: Roblox runs the callbacks of legacy
+	-- tweens that end on one step in an order that neither the call order nor a queue kept
+	-- Tweens' way gives (semantics.json: LQ2 to LQ4, LB, LT, TL), so these run in the order
+	-- called.
 	local function retire(state)
 		local queue = state.queue
 		local index = table.find(queue, state)
@@ -505,11 +506,11 @@ return function(hooks)
 		return start
 	end
 
-	-- A legacy tween reads where it starts from when it is called. A Tween reads it when
-	-- its curve first starts, on its first step or on the step its delay ends, so what is
-	-- set after Play or during the delay is where it starts; its repeats start there too
-	-- (semantics.json: LG, SN, SD, SR, and LT and TL, whose Tweens start where the legacy
-	-- tweens' first step left them).
+	-- A legacy tween reads where it starts from when it is called. A Tween reads it on the
+	-- first step it writes: its first step, or the step after its delay ends. So what is
+	-- set after Play, during the delay or on the step the delay ends is where it starts;
+	-- its repeats start there too (semantics.json: LG, SN, SD, SR, DC, and LT and TL, whose
+	-- Tweens start where the legacy tweens' first step left them).
 	local function begin(state, firstPlay)
 		state.start = if state.tween then nil else readStart(state)
 		state.count = 0
@@ -520,16 +521,16 @@ return function(hooks)
 		claim(state)
 	end
 
-	-- One step of a playing tween. A delay that has passed starts the curve on this step
-	-- and writes nothing; a cycle that has passed writes its end (the start when it
-	-- reverses) and starts the next repeat on this step, so what ran over is dropped.
+	-- One step of a playing tween. A delay that has passed starts the curve's clock on this
+	-- step, reads Playing and writes nothing; a cycle that has passed writes its end (the
+	-- start when it reverses) and starts the next repeat on this step, so what ran over is
+	-- dropped.
 	local function step(state, t)
 		local elapsed = t - state.phaseStart
 		if state.waiting then
 			if elapsed + EPSILON >= state.delay then
 				state.waiting = false
 				state.phaseStart = t
-				state.start = state.start or readStart(state)
 				setStatus(state, "Playing")
 			end
 			return
@@ -633,14 +634,11 @@ return function(hooks)
 			local written = if property == "Transparency" and instance:IsA("GuiObject")
 				then "BackgroundTransparency"
 				else property
-			-- A whole-number goal is kept as setting it would leave it: an int drops its
-			-- fraction (semantics.json: INT2), and an int64 rounds, as IntValue.Value's
-			-- setter does (a tween to a fractional int64 is not measured).
+			-- A whole-number goal drops its fraction, an int64 too, where setting
+			-- IntValue.Value rounds (semantics.json: INT2, I64A to I64C).
 			local integer = typeName == "int" or typeName == "int64"
-			if typeName == "int" then
+			if integer then
 				value = trunc(value)
-			elseif typeName == "int64" then
-				value = roundAway(value)
 			end
 			table.insert(list, { property = written, value = value, integer = integer })
 		end

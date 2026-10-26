@@ -689,30 +689,38 @@ Studio 0.744 on 2026-10-26 (tests/test_tween.py, the recordings in
 - GetValue for every style and direction, within 4.2e-7.
 - In a play-test client, 14 tweens and 5 legacy ones sampled every frame for 4.5 s,
   with delays, repeats (one forever), reverses, Pause, Cancel and a takeover; on the
-  Server, 43 more and 4 legacy ones for 1.3 s, with Pause, Cancel and Play while a
+  Server, 47 more and 8 legacy ones for 1.3 s, with Pause, Cancel and Play while a
   tween waits out its delay or after it has completed, a takeover of a playing and of
   a paused tween, a destroyed tween, a negative Time, RepeatCount -2, an empty goal
-  table, a fractional goal for a whole-number property, a legacy tween and a Tween on
-  one property each way round, and a property set after Play, during a delay or before
-  a repeat. Each read Studio's values (pixel
-  offsets within 0.5 px, the rest within 1e-3) and PlaybackState on every frame, and
-  fired Completed and the legacy callbacks within 2 ms of Studio and in its order.
+  table, fractional goals for 32- and 64-bit whole-number properties, a legacy tween
+  and a Tween on one property each way round, legacy tweens that end on one step, and
+  a property set after Play, during a delay, on the step a delay ends or before a
+  repeat. Each read Studio's values (pixel offsets within 0.5 px, the rest within
+  1e-3) and PlaybackState on every frame, and fired Completed and the legacy callbacks
+  within 2 ms of Studio and in its order, apart from legacy callbacks on one step
+  (below).
   Numbers, whole numbers, booleans, UDim, UDim2, Vector2, Vector3, CFrame, Color3 and
   Rect tween as Studio's do; the errors and TweenInfo's defaults read as Studio's.
 - Tweens step from the last one played to the first, one that completes gives its
   place to the last one, and a paused one played again goes to the end, so after a
   completion or a resume they step, and fire Completed, out of play order. RHR's model
   fits both recordings; Roblox does not document it.
-- A Tween reads where it starts on its first step, or on the step its delay ends, so a
-  property set after Play or during the delay is where it starts; its repeats start
-  there again, whatever was set in between. A legacy tween reads where it starts when
-  it is called.
+- A Tween reads where it starts on the first step it writes: its first step, or the
+  step after its delay ends (on the step the delay ends it reads Playing and writes
+  nothing). So a property set after Play, during the delay or on the step the delay
+  ends is where it starts; its repeats start there again, whatever was set in
+  between. A legacy tween reads where it starts when it is called.
 - A legacy tween and a Tween on one property both play to their ends. Legacy tweens
-  step first, in the order they were called, so the Tween's value is the one drawn,
-  and their callbacks run in that order.
+  step first, so the Tween's value is the one drawn. RHR runs the callbacks of legacy
+  tweens that end on one step in the order they were called. Roblox runs them in an
+  order that neither the call order nor a queue kept Tweens' way gives, and two
+  recordings of the same calls (LB, LT and TL) ran them in different orders, so the
+  test compares those callbacks by name.
 - A tween with no goals plays out its time and completes. A fractional goal for a
-  whole-number property drops its fraction when the tween is created (2.7 tweens to
-  2), and each value on the way is rounded.
+  whole-number property, 32- or 64-bit, drops its fraction when the tween is created
+  (2.7 tweens to 2, -2.5 to -2), and each value on the way is rounded. Setting
+  IntValue.Value directly rounds in Roblox (2.5 to 3) and drops the fraction in a
+  story, as Lune does.
 - Each recording times its samples with clock probes, 100 s Linear tweens whose
   progress Studio rounds to about 3 microseconds. The Server steps its tweens by
   Heartbeat's dt, so its recording is timed by dt; a client's tweens drift
@@ -724,18 +732,12 @@ Studio 0.744 on 2026-10-26 (tests/test_tween.py, the recordings in
 
 Not measured: where in Studio's frame tweens step (RHR's frame order is its own),
 where a paused tween stands among the playing ones while it is paused (RHR keeps its
-place), whether a legacy tween that completes gives its place to the last one as a
-Tween does (RHR keeps legacy tweens in the order called; no recorded legacy tween ends
-before one called after it), a Pause while a tween waits out a repeat's delay,
-Vector2int16, the default of a UICorner's CornerRadius before one is set (RHR starts
-it at Roblox's default 0, 8), whether a property's change signals fire before or after
-Completed (RHR fires both once every tween has stepped, in the order they were raised,
-so a tween's change signals come before its Completed), a fractional goal for a 64-bit whole
-number such as IntValue.Value (RHR rounds it as the property's setter does, half away
-from zero), whether a tween rounds a negative pixel offset at a half pixel up or away
-from zero (RHR rounds it up, -2.5 to -2), and whether a Tween whose delay ends reads
-where it starts on that step or the next (RHR reads it on that step; only a property
-set between the two would show it). A
+place), a Pause while a tween waits out a repeat's delay, Vector2int16, the default
+of a UICorner's CornerRadius before one is set (RHR starts it at Roblox's default 0,
+8), whether a property's change signals fire before or after Completed (RHR fires
+both once every tween has stepped, in the order they were raised, so a tween's change
+signals come before its Completed), and whether a tween rounds a negative pixel
+offset at a half pixel up or away from zero (RHR rounds it up, -2.5 to -2). A
 destroyed Tween plays on, as in Roblox, but its PlaybackState stays as it was when it
 was destroyed, since Lune refuses writes to a destroyed instance. Motion a script
 drives itself from RunService (a library's springs) runs on the same frames;

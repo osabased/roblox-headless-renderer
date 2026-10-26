@@ -126,7 +126,9 @@ local function recording(probeAfter)
 			table.insert(self.callbacks, { callback = name, status = status.Name, e = clock })
 		end
 	end
-	function self.replay(samples, plan, server)
+	-- `afterSample(index)`, if given, runs once each sample is read, where the recording
+	-- writes after its sample.
+	function self.replay(samples, plan, server, afterSample)
 		local times = {}
 		local since, offset = 0, 0
 		for index, sample in samples do
@@ -174,6 +176,9 @@ local function recording(probeAfter)
 				states[name] = tween.PlaybackState.Name
 			end
 			out[index] = { e = sample.e, values = values, states = states }
+			if afterSample then
+				afterSample(index)
+			end
 		end
 		local names = {}
 		for i, entry in self.tracks do
@@ -518,6 +523,15 @@ local function semantics(data)
 	local SR = new("NumberValue")
 	create("SR", SR, TweenInfo.new(0.2, Style.Linear, Direction.In, 1, false, 0.2), { Value = 100 })
 	track("SR.Value", SR, "Value")
+	for _, case in { { "I64A", 2.7 }, { "I64B", -2.5 }, { "I64C", 2.5 } } do
+		local value = new("IntValue")
+		if pcall(create, case[1], value, linear(0.6), { Value = case[2] }) then
+			track(case[1] .. ".Value", value, "Value")
+		end
+	end
+	local DC = new("NumberValue")
+	create("DC", DC, linear(100, 0.2), { Value = -1000 })
+	track("DC.Value", DC, "Value")
 	local LB = new("Frame", { Position = UDim2.new() })
 	track("LB.Position", LB, "Position")
 	local LT = new("Frame", { Position = UDim2.new() })
@@ -526,6 +540,10 @@ local function semantics(data)
 	track("TL.Position", TL, "Position")
 	local LG = new("Frame", { Position = UDim2.new() })
 	track("LG.Position", LG, "Position")
+	local LQ = {}
+	for i = 1, 4 do
+		LQ[i] = new("Frame", { Position = UDim2.new() })
+	end
 
 	for _, name in r.order do
 		if name ~= "R" then
@@ -539,6 +557,10 @@ local function semantics(data)
 	create("TLS", TL, linear(1), { Position = UDim2.fromOffset(0, 100) }):Play()
 	TL:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 1, false, r.callback("TL"))
 	LG:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 0.5, false, r.callback("LG"))
+	for i, frame in LQ do
+		frame:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, if i == 1 then 0.1 else 0.4, false,
+			r.callback(`LQ{i}`))
+	end
 	SN.Value = 40
 	LG.Position = UDim2.fromOffset(0, 40)
 
@@ -553,6 +575,7 @@ local function semantics(data)
 		{ "Bezier", function() TweenInfo.new(1, "Bezier") end },
 		{ "GetValue Spring", function() TweenService:GetValue(0.5, "Spring", Direction.In) end },
 		{ "legacy tween outside the data model", function() Instance.new("Frame"):TweenPosition(UDim2.new()) end },
+		{ "fractional int64 goal", function() TweenService:Create(new("IntValue"), linear(1), { Value = 2.5 }) end },
 	} do
 		local ok, problem = pcall(case[2])
 		table.insert(errors, { case = case[1], ok = ok, error = if ok then nil else tostring(problem) })
@@ -652,7 +675,9 @@ local function semantics(data)
 			r.tweens.PA:Play()
 			return before
 		end },
-	}, true)
+	}, true, function(index)
+		DC.Value = index
+	end)
 	result.errors = errors
 	result.infos = infos
 	result.setters = setters(data.setters)
