@@ -48,8 +48,8 @@ transitions and Animator poses do not play; the story's controls take their defa
 nothing is clicked.
 
 A story is run again only when something it runs on changed (the project's files,
-the screen, its insets and device, the story time, RHR's runtime and version, whether
-sizes are on): `check` then `ui` of the same story runs it once. A story that builds
+the screen, its insets and device, the story time, RHR's code and Lune, whether sizes
+are on): `check` then `ui` of the same story runs it once. A story that builds
 something different each run (random numbers, the date) keeps its first.
 """
 
@@ -220,9 +220,9 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     """Run `story` on a `width` x `height` screen (the `--device` one's insets and
     input, a `topbar_height` top bar, 58 by default) and return the model file with
     the UI it built: once it has settled, or at `story_time` seconds of story time."""
-    import rhr
     from rhr import devices, insets, rojo, story_sizes
     from rhr.ir import lune_executable
+    from rhr.server import code_stamp
 
     from rhr.profile import add, phase
 
@@ -242,10 +242,10 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     out.parent.mkdir(parents=True, exist_ok=True)
     stamp = out.with_name(out.name + ".inputs")
     with phase("story: inputs check"):
-        runtime = [(PACKAGE / "luau" / f"{file}.luau").stat() for file in ("story-runtime", "tween")]
+        # All of RHR's code, not only the runtime: rhr.story_sizes and the layout it
+        # calls answer the passes the story reads.
         inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes, when,
-                             [[part.st_size, part.st_mtime_ns] for part in runtime], str(lune_executable()),
-                             rhr.__version__])
+                             code_stamp(), str(lune_executable())])
     try:
         kept = json.loads(stamp.read_text(encoding="utf-8"))
         if out.is_file() and kept.get("inputs") == inputs:

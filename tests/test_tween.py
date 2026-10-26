@@ -282,8 +282,8 @@ def label(found: dict[str, dict], name: str) -> str | None:
 
 
 def stories() -> None:
-    # The story cache does not key on RHR's Python code (rhr.story_sizes answers the
-    # layout passes these stories read), so each story runs again.
+    # The checks read what a run logs (what is still moving, its layout passes, the
+    # timers left waiting), and a story reused from the cache logs none of it.
     from rhr.paths import IR_DIR
 
     for saved in (IR_DIR / "stories").glob("*/*.story.rbxm"):
