@@ -52,8 +52,9 @@ of truth and structured findings rather than only pixels.
 ## What it is not
 
 - Not an editor: RHR looks and never changes a file (not in 1.0).
-- Not a Roblox engine: no physics, gameplay or animation playback. The one input
-  where RHR runs code is a story, which it runs to see the UI the code builds.
+- Not a Roblox engine: no physics or gameplay; animation only as sampled,
+  deterministic moments of a story. The one input where RHR runs code is a story,
+  which it runs to see the UI the code builds.
 - Not a Studio companion: no live connection to a running Studio. Reading the
   install's files and its saved login is not one; Studio need not be running.
 - Not a pixel-perfect copy of Studio's renderer.
