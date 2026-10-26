@@ -28,18 +28,29 @@ result, with its change signals: AbsoluteSize, AbsolutePosition, TextBounds, a l
 AbsoluteContentSize, a ScrollingFrame's AbsoluteCanvasSize and AbsoluteWindowSize.
 RHR_STORY_SIZES=0 turns that off.
 
+Tweens (TweenService and GuiObject:TweenPosition, TweenSize, TweenSizeAndPosition)
+play on story time, stepped once a frame after PreRender (luau/tween.luau). The story
+is saved once it has settled: at least 30 frames after it mounted, its screen unchanged
+for 10 frames, no tween playing or waiting out its delay and no timer due before 5 s.
+At 5 s of story time it is saved as it is, and the log names what was still moving
+(each element and property, and tweens that repeat forever) and the timers still
+waiting, as it names timers due at or after 5 s when a story settles before them.
+`--story-time T` saves the frame at T seconds instead (0 to 60), the first frame
+from T.
+
 What does not carry over: a read in the same resumption that parented the element
 comes before any layout and reads zero, as do the other layout reads (AbsoluteRotation,
 a UIGridLayout's AbsoluteCellSize and AbsoluteCellCount) and elements outside the
 story's screen; TextFits and an image's IsLoaded read true; the camera's ViewportSize
 is the whole screen, where Studio leaves out a notch's side insets;
-TextService:GetTextBoundsAsync and GetTextSize are rough estimates; tweens end at their
-goal; the story's controls take their defaults; nothing is clicked.
+TextService:GetTextBoundsAsync and GetTextSize are rough estimates; StyleSheet
+transitions and Animator poses do not play; the story's controls take their defaults;
+nothing is clicked.
 
 A story is run again only when something it runs on changed (the project's files,
-the screen, its insets and device, RHR's runtime and version, whether sizes are on):
-`check` then `ui` of the same story runs it once. A story that builds something
-different each run (random numbers, the date) keeps its first.
+the screen, its insets and device, the story time, RHR's code and Lune, whether sizes
+are on): `check` then `ui` of the same story runs it once. A story that builds
+something different each run (random numbers, the date) keeps its first.
 """
 
 from __future__ import annotations
@@ -54,6 +65,9 @@ from rhr.paths import IR_DIR, PACKAGE
 
 SUFFIXES = (".story.luau", ".story.lua")
 TIMEOUT_S = 120
+# Without layout passes a story time adds frames of about 20 ms on a 900-element screen;
+# with them the limit runs from the last pass (rhr.story_sizes.run).
+TIMEOUT_PER_STORY_SECOND = 2.0
 
 
 def is_story(path: Path) -> bool:
@@ -153,14 +167,62 @@ def _tidy(text: str) -> str:
     return "\n".join(message + frames) or text
 
 
+def _motion(stdout: str, files: dict[str, str], root: Path) -> tuple[str, list[str]]:
+    """When the runtime saved the story (for the log) and what was still moving then
+    (as problems), from its RHR-MOTION line."""
+    found = re.search(r"^RHR-MOTION (.+)$", stdout, re.MULTILINE)
+    if not found:
+        return "", []
+    motion = json.loads(found.group(1))
+    time = float(motion.get("time") or 0)
+    asked = motion.get("asked")
+    timers = motion.get("timers") or []
+
+    def waiting(when: str) -> list[str]:
+        if not timers:
+            return []
+        places = sorted({timer["at"] for timer in timers if timer.get("at")})
+        return [_point_at_files(f"{len(timers)} timer(s) still waiting {when}"
+                                + (f": {', '.join(places[:4])}" if places else ""), files, root)]
+
+    if asked is not None:
+        if float(motion.get("mount") or 0) > asked + 1e-6:
+            return f"captured at {time:.2f} s of story time, once it had mounted", []
+        if time > asked + 1e-6:  # a frame is 1/60 s
+            return f"captured at {time:.2f} s of story time, the first frame from {asked:g} s", []
+        return f"captured at {time:.2f} s of story time", []
+    if motion.get("settled"):
+        # Timers due after the cap: the picture is the cap's, but the UI may change later.
+        return f"settled at {time:.2f} s of story time", waiting(f"when it settled at {time:.2f} s")
+    named: dict[str, list[str]] = {}
+    forever: set[str] = set()
+    for entry in [*(motion.get("moving") or []), *(motion.get("changing") or [])]:
+        properties = named.setdefault(entry["path"], [])
+        properties.extend(p for p in entry.get("properties") or [] if p not in properties)
+        if entry.get("forever"):
+            forever.add(entry["path"])
+    when = f"at {time:g} s of story time, captured there"
+    problems = []
+    if named:
+        shown = [f"{path} {', '.join(properties) or '(a tween with no goals)'}"
+                 + (" (repeats forever)" if path in forever else "")
+                 for path, properties in sorted(named.items())]
+        more = f" and {len(shown) - 8} more" if len(shown) > 8 else ""
+        problems.append(_point_at_files(f"still moving {when}: {'; '.join(shown[:8])}{more}", files, root))
+    problems.extend(waiting(when))
+    if not problems:
+        problems.append(f"the screen was still changing {when}")
+    return f"captured at the {time:g} s cap", problems
+
+
 def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: float | None = None,
-          log=None) -> Path:
+          story_time: float | None = None, log=None) -> Path:
     """Run `story` on a `width` x `height` screen (the `--device` one's insets and
     input, a `topbar_height` top bar, 58 by default) and return the model file with
-    the UI it built."""
-    import rhr
+    the UI it built: once it has settled, or at `story_time` seconds of story time."""
     from rhr import devices, insets, rojo, story_sizes
     from rhr.ir import lune_executable
+    from rhr.server import code_stamp
 
     from rhr.profile import add, phase
 
@@ -172,22 +234,24 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     area = json.dumps({"insets": [core.left, core.top, core.right, core.bottom], "topbar": topbar,
                        "input": device.preferred_input, "displaySize": device.display_size})
     sizes = "on" if story_sizes.enabled() else "off"
-    key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}|{sizes}".encode("utf-8")).hexdigest()[:12]
+    when = "settled" if story_time is None else repr(float(story_time))
+    key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}|{sizes}|{when}".encode("utf-8")).hexdigest()[:12]
     # One folder per story and screen, the file named after the story: documents name
     # their source by this file's name ("model": "Shop.story.json").
     out = IR_DIR / "stories" / key / f"{name}.story.rbxm"
     out.parent.mkdir(parents=True, exist_ok=True)
     stamp = out.with_name(out.name + ".inputs")
     with phase("story: inputs check"):
-        runtime = (PACKAGE / "luau" / "story-runtime.luau").stat()
-        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes,
-                             runtime.st_size, runtime.st_mtime_ns, str(lune_executable()), rhr.__version__])
+        # All of RHR's code, not only the runtime: rhr.story_sizes and the layout it
+        # calls answer the passes the story reads.
+        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes, when,
+                             code_stamp(), str(lune_executable())])
     try:
         kept = json.loads(stamp.read_text(encoding="utf-8"))
         if out.is_file() and kept.get("inputs") == inputs:
             if log is not None:
                 log(f"story  {story.name}: unchanged since its last run, reused the UI it built "
-                    f"({kept.get('count', '?')} instances)")
+                    f"({kept.get('count', '?')} instances{', ' + kept['saved'] if kept.get('saved') else ''})")
                 for line in kept.get("problems", [])[:10]:
                     log(f"story  {line}")
             return out
@@ -199,10 +263,18 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     with phase("story: rojo sourcemap"):
         names, files = module_path(project, story)
     passes = story_sizes.Passes(core.rect(width, height)) if sizes == "on" else None
+    timeout = TIMEOUT_S + TIMEOUT_PER_STORY_SECOND * (story_time or 0)
     with phase("story: run (Lune)"):
-        proc, stats = story_sizes.run(
-            [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built), json.dumps(names),
-             str(out), str(width), str(height), name, area, sizes], passes, timeout=TIMEOUT_S)
+        try:
+            proc, stats = story_sizes.run(
+                [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built),
+                 json.dumps(names), str(out), str(width), str(height), name, area, sizes, when], passes,
+                timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stalled = (f"no frame came for {timeout:g} s after {passes.count} layout passes" if passes is not None
+                       else f"it had not finished after {timeout:g} s")
+            raise RuntimeError(f"the story {story.name} was stopped: {stalled}. Code that loops without "
+                               "yielding (task.wait) never ends a frame") from None
     if passes is not None:
         add("story: layout passes (Python)", passes.seconds)
         add("story: layout passes (round trip)", float(stats.get("seconds") or 0))
@@ -212,12 +284,14 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     if proc.returncode != 0 or not out.is_file():
         raise RuntimeError(f"the story {story.name} failed:\n{problems or proc.stdout.strip() or 'no output'}")
     count = proc.stdout.strip().rpartition(" ")[2]
-    stamp.write_text(json.dumps({"inputs": inputs, "count": count, "problems": problems.splitlines()}),
-                     encoding="utf-8")
+    saved, still_moving = _motion(proc.stdout, files, project.parent)
+    problems = "\n".join([*still_moving, *filter(None, [problems])])
+    stamp.write_text(json.dumps({"inputs": inputs, "count": count, "saved": saved,
+                                 "problems": problems.splitlines()}), encoding="utf-8")
     if log is not None:
         log(f"story  {story.name}: ran it in its Rojo project, {count} instances built" + (
-            f", {passes.count} layout passes ({passes.skipped} on an unchanged screen) in {passes.seconds:.2f} s"
-            if passes is not None else ""))
+            f", {passes.count} layout passes ({passes.skipped} with nothing new to lay out) in {passes.seconds:.2f} s"
+            if passes is not None else "") + (f", {saved}" if saved else ""))
         for line in problems.splitlines()[:10]:
             log(f"story  {line}")
     return out

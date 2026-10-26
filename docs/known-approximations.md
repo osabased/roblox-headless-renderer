@@ -593,7 +593,9 @@ in Roblox; one saved elsewhere in a model changes nothing.
 ## Not done at all
 
 Scripts, physics, animation and anything else that happens at run time. A UI that a
-script builds or moves is previewed as it is saved in the file.
+script builds or moves is previewed as it is saved in the file. A story is the
+exception: it runs, on story time, and its tweens play (Story time and Tweens, under
+Devices).
 
 ## Hit map: who gets a click
 
@@ -664,8 +666,83 @@ create an InputObject: `UserInputService:GetDeviceAcceleration`, `GetDeviceGravi
 `defer`, `spawn` and `cancel`, the global `wait`, `delay` and `spawn`, `os.clock`,
 `tick`, `time` and `elapsedTime` follow it, so a timer fires on the frame it would at
 60 fps however long RHR takes over a frame (a `task.delay(0.25)` on frame 15). RHR
-runs frames until the story has mounted (at most 300) and 30 more. `os.time` and
-`DateTime` read the machine's clock.
+runs frames until the story has mounted (at most 300), then until it has settled: at
+least 30 more frames, its screen unchanged for the last 10 of them, no tween playing
+or waiting out a delay and no timer due before the cap. The cap is 5 s of story time;
+a story still moving there is saved as it is, and the log names what moved in its
+last frame (from the properties a script can set), which tweens were playing and
+where the timers still waiting were set (the `task.wait` or the function a `delay`
+runs). A story that settles with timers due at or after the cap is saved then, as
+the cap would show it, and the log names those timers. A frame's layout pass sees the screen
+before its timers and Heartbeat run, so the settled screen is also compared as the
+frame left it. `--story-time T` saves the first frame from T s instead (T up to 60;
+0 is the mount, before any frame), so a run of T values samples an animation.
+`os.time` and `DateTime` read the machine's clock.
+
+**Tweens.** A story's tweens play on story time: TweenService's Create, GetValue and
+TweenInfo, a Tween's Play, Pause, Cancel, PlaybackState and Completed, and the
+GuiObject TweenPosition, TweenSize and TweenSizeAndPosition (src/rhr/luau/tween.luau).
+Each frame steps them after PreRender, before the frame's layout. Measured against
+Studio 0.744 on 2026-10-26 (tests/test_tween.py, the recordings in
+`tests/fixtures/tween/`):
+
+- GetValue for every style and direction, within 4.2e-7.
+- In a play-test client, 14 tweens and 5 legacy ones sampled every frame for 4.5 s,
+  with delays, repeats (one forever), reverses, Pause, Cancel and a takeover; on the
+  Server, 47 more and 8 legacy ones for 1.3 s, with Pause, Cancel and Play while a
+  tween waits out its delay or after it has completed, a takeover of a playing and of
+  a paused tween, a destroyed tween, a negative Time, RepeatCount -2, an empty goal
+  table, fractional goals for 32- and 64-bit whole-number properties, a legacy tween
+  and a Tween on one property each way round, legacy tweens that end on one step, and
+  a property set after Play, during a delay, on the step a delay ends or before a
+  repeat. Each read Studio's values (pixel offsets within 0.5 px, the rest within
+  1e-3) and PlaybackState on every frame, and fired Completed and the legacy callbacks
+  within 2 ms of Studio and in its order, apart from three legacy callbacks on one
+  step (below).
+  Numbers, whole numbers, booleans, UDim, UDim2, Vector2, Vector3, CFrame, Color3 and
+  Rect tween as Studio's do; the errors and TweenInfo's defaults read as Studio's.
+- Tweens step from the last one played to the first, one that completes gives its
+  place to the last one, and a paused one played again goes to the end, so after a
+  completion or a resume they step, and fire Completed, out of play order. RHR's model
+  fits both recordings; Roblox does not document it. Legacy tweens are kept the same
+  way, apart from Tweens: four on one frame each, the first ending early, ran the
+  other three's callbacks in the order this gives.
+- A Tween reads where it starts on the first step it writes: its first step, or the
+  step after its delay ends (on the step the delay ends it reads Playing and writes
+  nothing). So a property set after Play, during the delay or on the step the delay
+  ends is where it starts; its repeats start there again, whatever was set in
+  between. A legacy tween reads where it starts when it is called.
+- A legacy tween and a Tween on one property both play to their ends. Legacy tweens
+  step first, so the Tween's value is the one drawn. Three legacy tweens that end
+  together, two with a Tween on the same frame (LB, LT and TL), ran their callbacks
+  in an order RHR's queue does not give, and in different orders in two recordings
+  (the second had more tweens playing), so the test compares those three by name.
+- A tween with no goals plays out its time and completes. A fractional goal for a
+  whole-number property, 32- or 64-bit, drops its fraction when the tween is created
+  (2.7 tweens to 2, -2.5 to -2), and each value on the way is rounded. Setting
+  IntValue.Value directly rounds in Roblox (2.5 to 3) and drops the fraction in a
+  story, as Lune does.
+- Each recording times its samples with clock probes, 100 s Linear tweens whose
+  progress Studio rounds to about 3 microseconds. The Server steps its tweens by
+  Heartbeat's dt, so its recording is timed by dt; a client's tweens drift
+  milliseconds from Heartbeat's dt, so its recording is timed by the probe. There one
+  sample, a position at a half pixel, matches only when read 3 microseconds off.
+- The legacy tweens' easing (TweenPosition and the like: Cubic, Exponential and
+  Circular hold their start until the end, then jump to the goal) was recorded on the
+  Server only, since a client's legacy tweens step only while its viewport renders.
+
+Not measured: where in Studio's frame tweens step (RHR's frame order is its own),
+where a paused tween stands among the playing ones while it is paused (RHR keeps its
+place), a Pause while a tween waits out a repeat's delay, Vector2int16, the default
+of a UICorner's CornerRadius before one is set (RHR starts it at Roblox's default 0,
+8), whether a property's change signals fire before or after Completed (RHR fires
+both once every tween has stepped, in the order they were raised, so a tween's change
+signals come before its Completed), and whether a tween rounds a negative pixel
+offset at a half pixel up or away from zero (RHR rounds it up, -2.5 to -2). A
+destroyed Tween plays on, as in Roblox, but its PlaybackState stays as it was when it
+was destroyed, since Lune refuses writes to a destroyed instance. Motion a script
+drives itself from RunService (a library's springs) runs on the same frames;
+StyleSheet transitions and Animator poses do not play.
 
 **Story-time layout reads.** While a story runs, RHR lays its screen out with the
 render's own layout (rhr.story_sizes) and writes what Roblox works out: AbsoluteSize;
@@ -677,7 +754,9 @@ Changed. It lays out after the story mounts and again while a layout changes a s
 or wakes a thread (8 times at most, then it warns that the story may resize what it
 measures), once a frame between PreRender and Heartbeat, and before it saves the
 screen. So a read from one of those signals, from `task.defer` or on a later frame
-gets the size the picture is drawn at. The story fixtures in
+gets the size the picture is drawn at. A pass whose screen differs from the last one
+only in Rotation, a transparency or a colour keeps the last answer, since layout reads
+none of them (tests/test_tween.py checks that on the layout fixtures). The story fixtures in
 `tests/fixtures/rojo_sizes/` read Studio's numbers for AbsoluteSize, AbsolutePosition,
 TextBounds and a UIListLayout's AbsoluteContentSize; on a phone area they compare only
 positions measured from the target, since where Roblox puts the target on a phone's

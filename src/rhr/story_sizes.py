@@ -48,6 +48,30 @@ def _document(file: Path, data: bytes) -> dict:
         out.unlink(missing_ok=True)
 
 
+def _drawn_only(name: bytes) -> bool:
+    # Properties the layout (rhr.ui_layout and the text it measures) never reads. Stories
+    # animate them every frame (a spinner, a fade), and a big screen takes a third of a
+    # second to lay out, so a screen that differs only in these keeps its last answer.
+    return name == b"Rotation" or name.endswith(b"Transparency") or name.endswith(b"Color3")
+
+
+def _layout_digest(data: bytes) -> str:
+    """A hash of a saved screen less its drawn-only properties, from the stored chunks:
+    each property of a class is one chunk, so this decodes only chunk headers."""
+    from rhr.rbxl_raw import _HEADER_BYTES, _decode, _header_end, _raw_chunks, _string
+
+    digest = hashlib.sha1()
+    for name, body, compressed, uncompressed in _raw_chunks(data):
+        if name == b"PROP":
+            head = _decode(name, body, compressed, uncompressed, _HEADER_BYTES)
+            if len(head) < uncompressed and _header_end(head) is None:
+                head = _decode(name, body, compressed, uncompressed)
+            if _drawn_only(_string(head, 4)[0]):
+                continue
+        digest.update(name + uncompressed.to_bytes(4, "little") + body)
+    return digest.hexdigest()
+
+
 def _pair(a: float, b: float) -> list[float]:
     # Rounded so a value the layout works out again reads as unchanged.
     return [round(float(a), 3), round(float(b), 3)]
@@ -103,19 +127,23 @@ class Passes:
 
     def reply(self, file: Path) -> str:
         """The JSON line for the pass saved at `file`. A screen saved byte for byte as
-        the last one gets the last answer again without a layout, all of it: the
-        runtime writes only what differs, and an element the story rebuilt as it was
-        still needs its sizes."""
+        the last one, or differing from it only in what layout never reads (Rotation,
+        transparencies, colours), gets the last answer again without a layout, all of
+        it: the runtime writes only what differs, and an element the story rebuilt as
+        it was still needs its sizes."""
         began = time.perf_counter()
         self.count += 1
         try:
             data = file.read_bytes()
-            digest = hashlib.sha1(data).hexdigest()
-            if self._last is not None and self._last[0] == digest:
+            try:
+                digest = _layout_digest(data)
+            except ValueError:  # not a binary file this reader takes: laid out every time
+                digest = None
+            if digest is not None and self._last is not None and self._last[0] == digest:
                 self.skipped += 1
                 return self._last[1]
             line = json.dumps(answer(_document(file, data), self.rect), separators=(",", ":"))
-            self._last = (digest, line)
+            self._last = (digest, line) if digest is not None else None
             return line
         except Exception as problem:  # noqa: BLE001 - the story still runs, without sizes
             if len(self.problems) < 3:
@@ -127,8 +155,10 @@ class Passes:
 
 
 def run(cmd: list[str], passes: Passes | None, *, timeout: float) -> tuple[subprocess.CompletedProcess, dict]:
-    """Run the story runtime, answering its layout passes, within `timeout` seconds (a
-    subprocess.TimeoutExpired past it). Returns the finished process, its stdout less
+    """Run the story runtime, answering its layout passes. It may take `timeout` seconds
+    from its start or, with passes, from its last pass (a frame of a big screen whose
+    layout changes every frame takes a third of a second, and a run has up to 3,900);
+    past that, subprocess.TimeoutExpired. Returns the finished process, its stdout less
     the pass lines, and the runtime's own count of its passes (empty without passes)."""
     from rhr.procs import no_window
 
@@ -163,6 +193,7 @@ def run(cmd: list[str], passes: Passes | None, *, timeout: float) -> tuple[subpr
             if line is None:
                 break
             if line.startswith("RHR-PASS "):
+                deadline = time.monotonic() + timeout
                 file = Path(line[len("RHR-PASS "):].strip())
                 try:
                     proc.stdin.write(passes.reply(file) + "\n")
