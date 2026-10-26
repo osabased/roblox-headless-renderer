@@ -1,6 +1,66 @@
 # Changelog
 
-## 1.0.0rc1+osabased.14 (fork)
+## 1.0.0rc1+osabased.15 (fork)
+
+1.0.0rc1+osabased.14 with tweens that play in stories.
+
+### When upgrading
+
+- **A story's tweens play, and RHR saves the story once it has settled**, where a
+  tween jumped to its goal on Play and the story was saved about 33 frames in. A story
+  whose tweens end within 5 s renders as before: the Badge and Scheduler fixtures and
+  a 942-instance shop story give the same layout byte for byte. A tween that repeats
+  forever, or one that has not ended by 5 s of story time, is drawn where it is at
+  5 s, and the log names it (`still moving at 5 s of story time ...`). Code waiting on
+  `Completed` now runs when the tween ends, not inside `Play`.
+- **A story that moves takes longer to run.** `rhr layout <story> --device desktop
+  --rich`, a fresh process each run with the story cache cleared, median of 5 runs
+  (3 for the last two):
+
+  | Story | 1.0.0rc1+osabased.14 | This version |
+  | --- | --- | --- |
+  | Scheduler fixture, 8 instances, no tween | 1.92 s | 1.92 s |
+  | Badge fixture, 5 instances, a 0.5 s tween | 1.88 s | 2.00 s (settled at 0.65 s) |
+  | A shop story, 942 instances, no tween | 3.30 s | 3.09 s |
+  | Forever fixture, a spinner that never stops | 1.84 s | 2.31 s (the 5 s cap) |
+  | 900 labels and a spinner that never stops | 3.49 s | 8.74 s (the 5 s cap) |
+
+  `--story-time T` runs T seconds of frames: the 900-label story at `--story-time 60`
+  takes 72 s. A story's 120 s time limit grows by 2 s per second of story time, and
+  while RHR lays the story's screen out it runs from the last layout pass, so a big
+  story that moves every frame is not cut off part way.
+
+### Added
+
+- **Tweens play on story time**: TweenService's Create, GetValue and TweenInfo, a
+  Tween's Play, Pause, Cancel, PlaybackState and Completed, and the GuiObject
+  TweenPosition, TweenSize and TweenSizeAndPosition, with delays, repeats (-1 is
+  forever), reverses and a later tween taking a property over. Measured against Studio
+  0.744 (tests/test_tween.py, recordings in tests/fixtures/tween/): GetValue for all
+  11 styles and 3 directions within 4.2e-7, where it returned the alpha unchanged; 14
+  tweens and 5 legacy ones sampled every frame for 4.5 s in a client, and 43 tweens
+  and 4 legacy ones in edge cases (Pause, Cancel and Play during a delay or after
+  completing, takeovers of a playing and a paused tween, a destroyed tween, an empty
+  goal table, a fractional goal for a whole-number property, a legacy tween and a
+  Tween on one property, a property set after Play or during a delay) for 1.3 s on
+  the Server, read
+  Studio's values (pixel offsets within 0.5 px, the rest within 1e-3) and
+  PlaybackState on every frame, and fire Completed and the legacy callbacks within
+  2 ms of Studio and in its order.
+- **`--story-time T`** saves a story T seconds in (0 to 60; 0 is the mount), so a
+  run of T values samples an animation. The story cache keys on it. On a file that is
+  not a story it exits 2.
+- **The log says when a story was saved**: `settled at 0.65 s of story time`, or
+  `captured at the 5 s cap` with what was still moving, which tweens were playing and
+  where each waiting timer was set, as a file and line of the project
+  (`src/Poll.story.luau:8`).
+
+### Faster
+
+- **A layout pass whose screen changed only in Rotation, a transparency or a colour
+  keeps the last answer**, since layout reads none of them. The 900-label story with
+  a spinner took 110 s to reach the 5 s cap without this, and laid its screen out 303
+  times; it now lays it out once.
 
 1.0.0rc1+osabased.13 with these fixes.
 
