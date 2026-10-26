@@ -179,9 +179,10 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     out.parent.mkdir(parents=True, exist_ok=True)
     stamp = out.with_name(out.name + ".inputs")
     with phase("story: inputs check"):
-        runtime = (PACKAGE / "luau" / "story-runtime.luau").stat()
+        runtime = [(PACKAGE / "luau" / f"{file}.luau").stat() for file in ("story-runtime", "tween")]
         inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes,
-                             runtime.st_size, runtime.st_mtime_ns, str(lune_executable()), rhr.__version__])
+                             [[part.st_size, part.st_mtime_ns] for part in runtime], str(lune_executable()),
+                             rhr.__version__])
     try:
         kept = json.loads(stamp.read_text(encoding="utf-8"))
         if out.is_file() and kept.get("inputs") == inputs:

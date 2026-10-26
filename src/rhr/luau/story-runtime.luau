@@ -421,32 +421,21 @@ roblox.implementMethod("Players", "GetPlayers", function(players)
 	return players:GetChildren()
 end)
 
--- Tweens finish at once: a still picture shows where they end.
-local TweenInfo = roblox.TweenInfo
-	or {
-		new = function(time, style, direction, repeats, reverses, delay)
-			return { Time = time or 1, EasingStyle = style, EasingDirection = direction, RepeatCount = repeats or 0,
-				Reverses = reverses or false, DelayTime = delay or 0 }
-		end,
-	}
-roblox.implementMethod("TweenService", "Create", function(_, instance, _info, goals)
-	local tween = { Completed = Signal.new(), PlaybackState = roblox.Enum.PlaybackState.Begin }
-	function tween.Play()
-		for property, value in goals do
-			instance[property] = value
-		end
-		tween.PlaybackState = roblox.Enum.PlaybackState.Completed
-		tween.Completed:Fire(roblox.Enum.PlaybackState.Completed)
-	end
-	return setmetatable(tween, {
-		__index = function()
-			return function() end
-		end,
-	})
-end)
-roblox.implementMethod("TweenService", "GetValue", function(_, alpha)
-	return alpha
-end)
+-- Tweens play on story time: each frame steps them (see Frames).
+local dataModel -- the story's game, once it is read
+local tweens = require("./tween")({
+	now = now,
+	event = eventOf,
+	changed = function(instance, property)
+		eventOf(instance, "property:" .. property):Fire()
+		eventOf(instance, "Changed"):Fire(property)
+	end,
+	spawn = storyTask.spawn,
+	inGame = function(instance)
+		return dataModel == nil or instance:IsDescendantOf(dataModel)
+	end,
+})
+local TweenInfo = tweens.TweenInfo
 -- Text measures: a rough width (RHR's own text engine lays the text out afterwards).
 roblox.implementMethod("TextService", "GetTextSize", function(_, text, size)
 	return roblox.Vector2.new(#tostring(text) * size * 0.5, size)
@@ -532,6 +521,7 @@ end)
 if not ok then
 	fail("could not read the built project: " .. tostring(game))
 end
+dataModel = game
 for _, instance in game:GetDescendants() do
 	presetComputed(instance)
 end
@@ -893,6 +883,8 @@ local function frame()
 	end
 	runService.RenderStepped:Fire(step)
 	runService.PreRender:Fire(step)
+	drain()
+	tweens.step()
 	drain()
 	if SIZES then
 		layoutPass()
