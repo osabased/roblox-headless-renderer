@@ -35,6 +35,8 @@ for 10 frames, no tween playing or waiting out its delay and no timer due before
 At 5 s of story time it is saved as it is, and the log names what was still moving
 (each element and property, and tweens that repeat forever) and the timers still
 waiting, as it names timers due at or after 5 s when a story settles before them.
+`--story-time T` saves the frame at T seconds instead (0 to 60), the first frame
+from T.
 
 What does not carry over: a read in the same resumption that parented the element
 comes before any layout and reads zero, as do the other layout reads (AbsoluteRotation,
@@ -46,9 +48,9 @@ transitions and Animator poses do not play; the story's controls take their defa
 nothing is clicked.
 
 A story is run again only when something it runs on changed (the project's files,
-the screen, its insets and device, RHR's runtime and version, whether sizes are on):
-`check` then `ui` of the same story runs it once. A story that builds something
-different each run (random numbers, the date) keeps its first.
+the screen, its insets and device, the story time, RHR's runtime and version, whether
+sizes are on): `check` then `ui` of the same story runs it once. A story that builds
+something different each run (random numbers, the date) keeps its first.
 """
 
 from __future__ import annotations
@@ -63,6 +65,9 @@ from rhr.paths import IR_DIR, PACKAGE
 
 SUFFIXES = (".story.luau", ".story.lua")
 TIMEOUT_S = 120
+# Without layout passes a story time adds frames of about 20 ms on a 900-element screen;
+# with them the limit runs from the last pass (rhr.story_sizes.run).
+TIMEOUT_PER_STORY_SECOND = 2.0
 
 
 def is_story(path: Path) -> bool:
@@ -170,6 +175,7 @@ def _motion(stdout: str, files: dict[str, str], root: Path) -> tuple[str, list[s
         return "", []
     motion = json.loads(found.group(1))
     time = float(motion.get("time") or 0)
+    asked = motion.get("asked")
     timers = motion.get("timers") or []
 
     def waiting(when: str) -> list[str]:
@@ -179,6 +185,12 @@ def _motion(stdout: str, files: dict[str, str], root: Path) -> tuple[str, list[s
         return [_point_at_files(f"{len(timers)} timer(s) still waiting {when}"
                                 + (f": {', '.join(places[:4])}" if places else ""), files, root)]
 
+    if asked is not None:
+        if float(motion.get("mount") or 0) > asked + 1e-6:
+            return f"captured at {time:.2f} s of story time, once it had mounted", []
+        if time > asked + 1e-6:  # a frame is 1/60 s
+            return f"captured at {time:.2f} s of story time, the first frame from {asked:g} s", []
+        return f"captured at {time:.2f} s of story time", []
     if motion.get("settled"):
         # Timers due after the cap: the picture is the cap's, but the UI may change later.
         return f"settled at {time:.2f} s of story time", waiting(f"when it settled at {time:.2f} s")
@@ -203,10 +215,10 @@ def _motion(stdout: str, files: dict[str, str], root: Path) -> tuple[str, list[s
 
 
 def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: float | None = None,
-          log=None) -> Path:
+          story_time: float | None = None, log=None) -> Path:
     """Run `story` on a `width` x `height` screen (the `--device` one's insets and
     input, a `topbar_height` top bar, 58 by default) and return the model file with
-    the UI it built, once it has settled."""
+    the UI it built: once it has settled, or at `story_time` seconds of story time."""
     import rhr
     from rhr import devices, insets, rojo, story_sizes
     from rhr.ir import lune_executable
@@ -221,7 +233,8 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     area = json.dumps({"insets": [core.left, core.top, core.right, core.bottom], "topbar": topbar,
                        "input": device.preferred_input, "displaySize": device.display_size})
     sizes = "on" if story_sizes.enabled() else "off"
-    key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}|{sizes}".encode("utf-8")).hexdigest()[:12]
+    when = "settled" if story_time is None else repr(float(story_time))
+    key = hashlib.sha1(f"{story.resolve()}|{width}x{height}|{area}|{sizes}|{when}".encode("utf-8")).hexdigest()[:12]
     # One folder per story and screen, the file named after the story: documents name
     # their source by this file's name ("model": "Shop.story.json").
     out = IR_DIR / "stories" / key / f"{name}.story.rbxm"
@@ -229,7 +242,7 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     stamp = out.with_name(out.name + ".inputs")
     with phase("story: inputs check"):
         runtime = [(PACKAGE / "luau" / f"{file}.luau").stat() for file in ("story-runtime", "tween")]
-        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes,
+        inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes, when,
                              [[part.st_size, part.st_mtime_ns] for part in runtime], str(lune_executable()),
                              rhr.__version__])
     try:
@@ -249,10 +262,18 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
     with phase("story: rojo sourcemap"):
         names, files = module_path(project, story)
     passes = story_sizes.Passes(core.rect(width, height)) if sizes == "on" else None
+    timeout = TIMEOUT_S + TIMEOUT_PER_STORY_SECOND * (story_time or 0)
     with phase("story: run (Lune)"):
-        proc, stats = story_sizes.run(
-            [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built), json.dumps(names),
-             str(out), str(width), str(height), name, area, sizes], passes, timeout=TIMEOUT_S)
+        try:
+            proc, stats = story_sizes.run(
+                [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built),
+                 json.dumps(names), str(out), str(width), str(height), name, area, sizes, when], passes,
+                timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stalled = (f"no frame came for {timeout:g} s after {passes.count} layout passes" if passes is not None
+                       else f"it had not finished after {timeout:g} s")
+            raise RuntimeError(f"the story {story.name} was stopped: {stalled}. Code that loops without "
+                               "yielding (task.wait) never ends a frame") from None
     if passes is not None:
         add("story: layout passes (Python)", passes.seconds)
         add("story: layout passes (round trip)", float(stats.get("seconds") or 0))

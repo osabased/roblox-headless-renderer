@@ -106,6 +106,9 @@ def parse_fov(text: str) -> float:
     return value
 
 
+STORY_TIME_MAX = 60.0
+
+
 def parse_background(text: str) -> tuple[int, int, int, int]:
     raw = text.lstrip("#")
     if len(raw) == 8:  # RRGGBBAA
@@ -118,14 +121,14 @@ def parse_background(text: str) -> tuple[int, int, int, int]:
 
 
 def ir_for(source: Path, *, profile: str = "full", viewport: tuple[int, int] = DEFAULT_VIEWPORT,
-           topbar_height: float | None = None) -> Path:
+           topbar_height: float | None = None, story_time: float | None = None) -> Path:
     """IR JSON for `source`: the file itself if it is IR, else the cached conversion
     (made again when the file changed).
 
     `source` may also be a Rojo project (a *.project.json file or a directory with
     default.project.json), which is built with `rojo build` first, or a story file
     (*.story.luau), which is run at `viewport` under a `topbar_height` top bar and the
-    UI it builds read (rhr.story).
+    UI it builds read once it has settled, or at `story_time` (rhr.story).
     """
     from rhr.ir import cached_ir, load_ir
     from rhr import rojo, story
@@ -133,7 +136,9 @@ def ir_for(source: Path, *, profile: str = "full", viewport: tuple[int, int] = D
     if story.is_story(source):
         # UI that code builds: the story is run in its Rojo project (rhr.story).
         source = story.build(source, width=viewport[0], height=viewport[1], topbar_height=topbar_height,
-                             log=lambda message: print(message, file=sys.stderr))
+                             story_time=story_time, log=lambda message: print(message, file=sys.stderr))
+    elif story_time is not None:
+        raise ValueError(f"--story-time is for a story (*.story.luau); {source.name} is not one")
     project = rojo.project_file(source)
     if project is not None:
         source = rojo.build(project, IR_DIR)
@@ -259,7 +264,8 @@ def _ui(args) -> int:
 
     t0 = time.perf_counter()
     try:
-        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
+        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height,
+                         story_time=args.story_time)
     except (ValueError, RuntimeError) as exc:
         return _die(str(exc))
     statuses = _prepare_ui_images(ir_path, args.offline)
@@ -361,7 +367,8 @@ def _layout(args) -> int:
         return _die(f"no such file: {source}")
     width, height = args.viewport
     try:
-        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
+        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height,
+                         story_time=args.story_time)
         screens = load_screens(str(ir_path), width, height, args.topbar_height, required=True)
     except (ValueError, RuntimeError) as exc:
         return _die(str(exc))
@@ -532,7 +539,8 @@ def _check(args) -> int:
         if args.devices:
             result = _check_devices(args, source, baseline)
         else:
-            ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
+            ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height,
+                             story_time=args.story_time)
             result = check_model(ir_path, width, height, topbar_height=args.topbar_height,
                                  min_severity=args.min_severity, ignore=tuple(args.ignore), baseline=baseline)
     except (ValueError, RuntimeError, OSError) as exc:
@@ -582,7 +590,8 @@ def _check_devices(args, source, baseline) -> dict:
         for name in names:
             devices.CURRENT = devices.DEVICES[name]
             width, height = devices.CURRENT.viewport
-            ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
+            ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height,
+                             story_time=args.story_time)
             result = check_model(ir_path, width, height, topbar_height=args.topbar_height,
                                  min_severity=args.min_severity, ignore=tuple(args.ignore), baseline=baseline)
             model = result["model"]
@@ -663,7 +672,8 @@ def _hitmap(args) -> int:
     width, height = args.viewport
     t0 = time.perf_counter()
     try:
-        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height)
+        ir_path = ir_for(source, profile="ui", viewport=(width, height), topbar_height=args.topbar_height,
+                         story_time=args.story_time)
         hitmap = build_hitmap(ir_path, width, height, topbar_height=args.topbar_height)
     except (ValueError, RuntimeError) as exc:
         return _die(str(exc))
@@ -905,7 +915,8 @@ def _preview(args) -> int:
     try:
         # A stored model (--focus) or stored ScreenGuis (--all-guis) need the storage read too.
         ir_path = ir_for(source, profile="static" if args.focus or args.all_guis else "world",
-                          viewport=(width, height), topbar_height=args.topbar_height)
+                          viewport=(width, height), topbar_height=args.topbar_height,
+                          story_time=args.story_time)
         from rhr.ir import world_ir
 
         world_path = world_ir(ir_path, args.focus)
@@ -1034,6 +1045,24 @@ def _scene_dump(args) -> int:
         file=sys.stderr,
     )
     return 0
+
+
+def parse_story_time(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--story-time is seconds of story time, got {text!r}") from None
+    if not math.isfinite(value) or value < 0 or value > STORY_TIME_MAX:
+        raise argparse.ArgumentTypeError(
+            f"--story-time is between 0 and {STORY_TIME_MAX:g} seconds of story time, got {text!r}")
+    return value
+
+
+def _story_time_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--story-time", type=parse_story_time, metavar="T",
+                        help="for a story: save its UI T seconds into the story, with tweens and "
+                             "timers where they are then (default: once its motion has settled, at "
+                             "most 5 s in)")
 
 
 def _effect_arguments(parser: argparse.ArgumentParser) -> None:
@@ -1203,6 +1232,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="top bar inset in px for a CoreUISafeInsets ScreenGui (default: 58, "
              "see docs/known-approximations.md)",
     )
+    _story_time_argument(p_ui)
     p_ui.add_argument("--crop", metavar="PATH", help="cut the PNG to this element, with a margin")
     p_ui.add_argument("--fit", action="store_true", help="cut the PNG to what was drawn, with a margin")
     p_ui.add_argument("--annotate", action="store_true",
@@ -1240,6 +1270,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="top bar inset in px for a CoreUISafeInsets ScreenGui (default: 58)",
     )
+    _story_time_argument(p_layout)
     p_layout.add_argument("--path", metavar="PATH", help="only the elements under PATH")
     p_layout.add_argument("--all-guis", action="store_true",
                           help="in a place, also draw ScreenGuis stored outside StarterGui (templates scripts clone in)")
@@ -1266,6 +1297,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="top bar inset in px for a CoreUISafeInsets ScreenGui (default: 58)",
     )
+    _story_time_argument(p_check)
     p_check.add_argument("--min-severity", choices=("error", "warning", "info"), default="warning",
                          help="least severity reported (default: warning; info adds patterns that are "
                               "often intended, and images only RHR's render leaves out)")
@@ -1329,6 +1361,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="top bar inset in px for a CoreUISafeInsets ScreenGui (default: 58)",
     )
+    _story_time_argument(p_hitmap)
     p_hitmap.add_argument("--at", type=parse_point, metavar="X,Y",
                           help="who gets a click at this pixel, and everything interactive under it")
     p_hitmap.add_argument("--path", metavar="PATH", help="only the interactive elements under PATH")
@@ -1434,6 +1467,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="top bar inset in px for ScreenGui composition (default: 58)",
     )
+    _story_time_argument(p_preview)
     p_preview.add_argument("--all-guis", action="store_true",
                            help="in a place, also draw ScreenGuis stored outside StarterGui (templates scripts clone in)")
     p_preview.add_argument("--show", action="append", default=[], metavar="PATH",

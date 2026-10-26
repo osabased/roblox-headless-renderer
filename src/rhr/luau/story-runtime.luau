@@ -998,8 +998,10 @@ end
 -- The story is saved once it has settled: at least MIN_FRAMES frames after it mounted,
 -- its screen unchanged for STILL_FRAMES frames in a row, no tween playing or waiting
 -- out a delay, and no timer due before the cap. At CAP_SECONDS of story time it is saved
--- as it is. RHR-MOTION reports when the story was saved and what was still moving.
+-- as it is. A story time (the ninth argument, in seconds) saves the frame at that time
+-- instead. RHR-MOTION reports when the story was saved and what was still moving.
 local MIN_FRAMES, STILL_FRAMES, CAP_SECONDS = 30, 10, 5
+local storyTime = tonumber(process.args[9])
 
 local function screenBytes(fresh)
 	if SIZES and not fresh then
@@ -1115,35 +1117,42 @@ end
 
 local mountFrame = storyFrame
 local still, lastBytes = 0, nil
-local motion = { settled = false }
-local capFrame = math.max(math.round(CAP_SECONDS * 60), mountFrame + MIN_FRAMES)
-local before = nil
-while true do
-	if storyFrame >= mountFrame + MIN_FRAMES and still >= STILL_FRAMES and #tweens.moving() == 0
-		and #timersBefore(capFrame / 60) == 0 then
-		-- A pass saves the screen before the frame's timers and Heartbeat run, so the
-		-- screen as the frame left it must match it too: a timer in this frame may
-		-- have started a motion of its own.
-		if not SIZES or screenBytes(true) == lastBytes then
-			motion.settled = true
+local motion = { settled = false, asked = storyTime }
+if storyTime then
+	local frameAt = math.ceil(storyTime * 60 - 1e-6)
+	while storyFrame < frameAt do
+		frame()
+	end
+else
+	local capFrame = math.max(math.round(CAP_SECONDS * 60), mountFrame + MIN_FRAMES)
+	local before = nil
+	while true do
+		if storyFrame >= mountFrame + MIN_FRAMES and still >= STILL_FRAMES and #tweens.moving() == 0
+			and #timersBefore(capFrame / 60) == 0 then
+			-- A pass saves the screen before the frame's timers and Heartbeat run, so the
+			-- screen as the frame left it must match it too: a timer in this frame may
+			-- have started a motion of its own.
+			if not SIZES or screenBytes(true) == lastBytes then
+				motion.settled = true
+				break
+			end
+			still = 0
+		end
+		if storyFrame >= capFrame then
 			break
 		end
-		still = 0
+		if storyFrame + 1 == capFrame then
+			before = propertyValues()
+		end
+		frame()
+		-- Without layout passes the screen is saved only for the frames the rule reads.
+		local bytes = if SIZES or storyFrame >= mountFrame + MIN_FRAMES - STILL_FRAMES then screenBytes() else nil
+		still = if bytes ~= nil and bytes == lastBytes then still + 1 else 0
+		lastBytes = bytes
 	end
-	if storyFrame >= capFrame then
-		break
+	if not motion.settled and before then
+		motion.changing = changes(before, propertyValues())
 	end
-	if storyFrame + 1 == capFrame then
-		before = propertyValues()
-	end
-	frame()
-	-- Without layout passes the screen is saved only for the frames the rule reads.
-	local bytes = if SIZES or storyFrame >= mountFrame + MIN_FRAMES - STILL_FRAMES then screenBytes() else nil
-	still = if bytes ~= nil and bytes == lastBytes then still + 1 else 0
-	lastBytes = bytes
-end
-if not motion.settled and before then
-	motion.changing = changes(before, propertyValues())
 end
 settle()
 

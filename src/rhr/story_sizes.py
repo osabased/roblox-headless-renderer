@@ -127,8 +127,10 @@ class Passes:
 
 
 def run(cmd: list[str], passes: Passes | None, *, timeout: float) -> tuple[subprocess.CompletedProcess, dict]:
-    """Run the story runtime, answering its layout passes, within `timeout` seconds (a
-    subprocess.TimeoutExpired past it). Returns the finished process, its stdout less
+    """Run the story runtime, answering its layout passes. It may take `timeout` seconds
+    from its start or, with passes, from its last pass (a frame of a big screen whose
+    layout changes every frame takes a third of a second, and a run has up to 3,900);
+    past that, subprocess.TimeoutExpired. Returns the finished process, its stdout less
     the pass lines, and the runtime's own count of its passes (empty without passes)."""
     from rhr.procs import no_window
 
@@ -163,6 +165,7 @@ def run(cmd: list[str], passes: Passes | None, *, timeout: float) -> tuple[subpr
             if line is None:
                 break
             if line.startswith("RHR-PASS "):
+                deadline = time.monotonic() + timeout
                 file = Path(line[len("RHR-PASS "):].strip())
                 try:
                     proc.stdin.write(passes.reply(file) + "\n")
