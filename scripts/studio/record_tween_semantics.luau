@@ -2,9 +2,12 @@
 -- tween that takes over every property of a playing or paused one, Pause, Cancel and
 -- Play while a tween waits out its delay, has not started or has completed, replays,
 -- a destroyed tween, a negative Time, RepeatCount -2, value types beyond the GUI ones,
--- whole-number properties, GuiObject.Transparency, setters that clamp an overshoot,
--- what Create, TweenInfo.new and the legacy tweens refuse, and a legacy tween's
--- callback when an override is refused.
+-- whole-number properties and a fractional goal for one, GuiObject.Transparency,
+-- setters that clamp an overshoot, booleans on curves that leave 0..1, an empty goal
+-- table, zero-Time repeats, Pause and Play in one frame, a legacy tween and a Tween on
+-- one property each way round, a property set after Play, during a delay or before a
+-- repeat, what Create, TweenInfo.new and the legacy tweens refuse, and a legacy
+-- tween's callback when an override is refused.
 --
 -- Run it in Studio Play mode on the Server datamodel through the Studio MCP's
 -- execute_luau (a client's tweens step only while its viewport renders). The JSON is
@@ -195,8 +198,54 @@ create("INT", INT, linear(1), { BorderSizePixel = 3, LayoutOrder = -3 })
 track("INT.BorderSizePixel", INT, "BorderSizePixel")
 track("INT.LayoutOrder", INT, "LayoutOrder")
 
+local EMP = new("NumberValue")
+create("EMP", EMP, linear(0.4), {})
+
+-- Three that end on one frame, the first paused and played again at once.
+local RA, RB, RC = new("NumberValue"), new("NumberValue"), new("NumberValue")
+create("RA", RA, linear(0.5), { Value = 100 })
+create("RB", RB, linear(0.5), { Value = 100 })
+create("RC", RC, linear(0.5), { Value = 100 })
+track("RA.Value", RA, "Value")
+
+local BVB = new("BoolValue", { Value = false })
+create("BVB", BVB, TweenInfo.new(1, Style.Back, Direction.In), { Value = true })
+track("BVB.Value", BVB, "Value")
+local BVO = new("BoolValue", { Value = true })
+create("BVO", BVO, TweenInfo.new(1, Style.Back, Direction.Out), { Value = false })
+track("BVO.Value", BVO, "Value")
+
+local ZR = new("NumberValue")
+create("ZR", ZR, TweenInfo.new(0, Style.Linear, Direction.In, 2, true), { Value = 7 })
+track("ZR.Value", ZR, "Value")
+local ZN = new("NumberValue")
+create("ZN", ZN, TweenInfo.new(0, Style.Linear, Direction.In, 2, false), { Value = 7 })
+track("ZN.Value", ZN, "Value")
+
+local INT2 = new("Frame", { BorderSizePixel = 0, LayoutOrder = 0 })
+create("INT2", INT2, linear(0.3), { BorderSizePixel = 2.7, LayoutOrder = -2.7 })
+track("INT2.BorderSizePixel", INT2, "BorderSizePixel")
+track("INT2.LayoutOrder", INT2, "LayoutOrder")
+
+-- Set after Play before any step, during a delay, and during the delay before a repeat.
+local SN = new("NumberValue")
+create("SN", SN, linear(0.4), { Value = 100 })
+track("SN.Value", SN, "Value")
+local SD = new("NumberValue")
+create("SD", SD, linear(0.4, 0.2), { Value = 100 })
+track("SD.Value", SD, "Value")
+local SR = new("NumberValue")
+create("SR", SR, TweenInfo.new(0.2, Style.Linear, Direction.In, 1, false, 0.2), { Value = 100 })
+track("SR.Value", SR, "Value")
+
 local LB = new("Frame", { Position = UDim2.new() })
 track("LB.Position", LB, "Position")
+local LT = new("Frame", { Position = UDim2.new() })
+track("LT.Position", LT, "Position")
+local TL = new("Frame", { Position = UDim2.new() })
+track("TL.Position", TL, "Position")
+local LG = new("Frame", { Position = UDim2.new() })
+track("LG.Position", LG, "Position")
 local function callback(name)
 	return function(status)
 		callbacks[#callbacks + 1] = { callback = name, status = status.Name, e = mainProbe.Value }
@@ -210,6 +259,13 @@ for _, name in tweenNames do
 end
 mainProbeTween:Play()
 LB:TweenPosition(UDim2.fromOffset(200, 0), Direction.Out, Style.Linear, 1, false, callback("LB"))
+LT:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 1, false, callback("LT"))
+create("LTS", LT, linear(1), { Position = UDim2.fromOffset(0, 100) }):Play()
+create("TLS", TL, linear(1), { Position = UDim2.fromOffset(0, 100) }):Play()
+TL:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 1, false, callback("TL"))
+LG:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 0.5, false, callback("LG"))
+SN.Value = 40
+LG.Position = UDim2.fromOffset(0, 40)
 
 -- What Create and TweenInfo.new refuse, and what TweenInfo.new keeps.
 local errors = {}
@@ -304,9 +360,20 @@ local plan = {
 		tweens.DLY:Destroy()
 		tweens.DLY = nil
 	end },
+	{ at = 0.1, name = "SD:set(delay)", fn = function()
+		SD.Value = 50
+	end },
+	{ at = 0.5, name = "SR:set(repeat delay)", fn = function()
+		SR.Value = 30
+	end },
 	{ at = 0.2, name = "PA:Pause", fn = function()
 		tweens.PA:Pause()
 		return tweens.PA.PlaybackState.Name
+	end },
+	{ at = 0.2, name = "RA:Pause+Play", fn = function()
+		tweens.RA:Pause()
+		tweens.RA:Play()
+		return tweens.RA.PlaybackState.Name
 	end },
 	{ at = 0.3, name = "P2:Play(delayed takeover)", prepare = function()
 		return create("P2", P, linear(0.2, 0.3), { Value = 500 })

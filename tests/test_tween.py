@@ -13,7 +13,9 @@
 - legacy.json: the legacy tweens' easing for every style and direction, and what a
   property reads after a value outside its range is set.
 - semantics.json: Play, Pause and Cancel from each state, takeovers, every tweenable
-  value type, the errors TweenService and TweenInfo raise, and TweenInfo's defaults.
+  value type, whole-number goals, an empty goal table, a legacy tween and a Tween on one
+  property, a property set after Play or during a delay, the errors TweenService and
+  TweenInfo raise, and TweenInfo's defaults.
 
 `tests/tween_replay.luau` rebuilds each recording's tweens on RHR's tween clock
 (src/rhr/luau/tween.luau), sets the clock to each sample's time and reads the same
@@ -22,8 +24,8 @@ probe tweens and, on a Server, Heartbeat's dt, so values compare at the moment S
 read them: GetValue and the legacy easing within 1e-4, pixel offsets within 0.5 px,
 anything else within 1e-3, and Completed and the legacy callbacks within 2 ms. A probe
 reads up to 3 us off, so in the client's recording, timed by the probe alone, a value
-that matches only when read that much earlier or later is noted, not failed. Probes
-that disagree by more than 10 us fail the recording.
+that matches only when read that much earlier or later is noted, not failed (more than
+two fail). Probes that disagree by more than 10 us fail the recording.
 
 Stories in `tests/fixtures/rojo_tween/` play tweens at mount. A story is captured once
 it has settled (nothing changed for 10 frames), or at 5 s of story time with what is
@@ -101,6 +103,9 @@ def replay(*shift: str) -> dict | None:
 # A clock probe is a 100 s Linear tween, whose progress Studio rounds to about 2^-25 of
 # its length.
 PROBE_ERROR = 100 * 2**-25
+# A value sits within a probe's error of a rounding edge rarely; many that do mean the
+# replay's clock is off, not the probe.
+MAX_NUDGED = 2
 
 
 def clock_spread(recording: dict) -> float:
@@ -164,6 +169,8 @@ def compare_run(label: str, studio: dict, rhr: dict, shifted: list[dict]) -> Non
         summary(f"{label} {name}", problems, len(studio["samples"]))
     if nudged:
         print(f"  note {label}: {len(nudged)} value(s) match when read within a probe's error: {'; '.join(nudged[:4])}")
+    check(len(nudged) <= MAX_NUDGED, f"{label}: at most {MAX_NUDGED} values match only within a probe's error "
+                                     f"({len(nudged)})")
 
     problems, total = [], 0
     for sample, got in zip(studio["samples"], rhr["samples"]):
@@ -177,15 +184,35 @@ def compare_run(label: str, studio: dict, rhr: dict, shifted: list[dict]) -> Non
     got = [(c["tween"], c["state"]) for c in rhr["completions"]]
     check(got == want, f"{label} Completed fires in Studio's order: {got if got != want else len(want)}"
                        + (f" != {want}" if got != want else " events"))
+
+    def by_occurrence(completions: list[dict]) -> dict:
+        """Each event by tween, state and how many times it had fired, so one out of order
+        is still compared with its own."""
+        counts: dict[tuple, int] = {}
+        out = {}
+        for c in completions:
+            key = (c["tween"], c["state"])
+            counts[key] = counts.get(key, 0) + 1
+            out[(*key, counts[key])] = c
+        return out
+
     problems = []
-    for want_c, got_c in zip(studio["completions"], rhr["completions"]):
+    got_by = by_occurrence(rhr["completions"])
+    for key, want_c in by_occurrence(studio["completions"]).items():
         name = f"{want_c['tween']} {want_c['state']}"
+        got_c = got_by.get(key)
+        if got_c is None:
+            problems.append(f"{name} does not fire")
+            continue
+        issues = []
         if abs(got_c["e"] - want_c["e"]) > 2e-3:
-            problems.append(f"{name} at {got_c['e']:.4f}, Studio {want_c['e']:.4f}")
-        for prop, value in want_c["values"].items():
+            issues.append(f"{name} at {got_c['e']:.4f}, Studio {want_c['e']:.4f}")
+        for prop, value in (want_c["values"] or {}).items():
             kind = "UDim2" if prop in UDIM2 else "UDim" if prop in UDIM else "other"
             if not same_value(got_c["values"].get(prop), value, kind):
-                problems.append(f"{name} {prop} {got_c['values'].get(prop)} != {value}")
+                issues.append(f"{name} {prop} {got_c['values'].get(prop)} != {value}")
+        if issues:
+            problems.append(", ".join(issues))
     summary(f"{label} Completed: when, and the values it reads", problems, len(studio["completions"]))
 
     want = studio.get("callbacks", [])

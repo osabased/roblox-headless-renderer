@@ -486,8 +486,46 @@ local function semantics(data)
 	create("INT", INT, linear(1), { BorderSizePixel = 3, LayoutOrder = -3 })
 	track("INT.BorderSizePixel", INT, "BorderSizePixel")
 	track("INT.LayoutOrder", INT, "LayoutOrder")
+	local EMP = new("NumberValue")
+	create("EMP", EMP, linear(0.4), {})
+	local RA, RB, RC = new("NumberValue"), new("NumberValue"), new("NumberValue")
+	create("RA", RA, linear(0.5), { Value = 100 })
+	create("RB", RB, linear(0.5), { Value = 100 })
+	create("RC", RC, linear(0.5), { Value = 100 })
+	track("RA.Value", RA, "Value")
+	local BVB = new("BoolValue", { Value = false })
+	create("BVB", BVB, TweenInfo.new(1, Style.Back, Direction.In), { Value = true })
+	track("BVB.Value", BVB, "Value")
+	local BVO = new("BoolValue", { Value = true })
+	create("BVO", BVO, TweenInfo.new(1, Style.Back, Direction.Out), { Value = false })
+	track("BVO.Value", BVO, "Value")
+	local ZR = new("NumberValue")
+	create("ZR", ZR, TweenInfo.new(0, Style.Linear, Direction.In, 2, true), { Value = 7 })
+	track("ZR.Value", ZR, "Value")
+	local ZN = new("NumberValue")
+	create("ZN", ZN, TweenInfo.new(0, Style.Linear, Direction.In, 2, false), { Value = 7 })
+	track("ZN.Value", ZN, "Value")
+	local INT2 = new("Frame", { BorderSizePixel = 0, LayoutOrder = 0 })
+	create("INT2", INT2, linear(0.3), { BorderSizePixel = 2.7, LayoutOrder = -2.7 })
+	track("INT2.BorderSizePixel", INT2, "BorderSizePixel")
+	track("INT2.LayoutOrder", INT2, "LayoutOrder")
+	local SN = new("NumberValue")
+	create("SN", SN, linear(0.4), { Value = 100 })
+	track("SN.Value", SN, "Value")
+	local SD = new("NumberValue")
+	create("SD", SD, linear(0.4, 0.2), { Value = 100 })
+	track("SD.Value", SD, "Value")
+	local SR = new("NumberValue")
+	create("SR", SR, TweenInfo.new(0.2, Style.Linear, Direction.In, 1, false, 0.2), { Value = 100 })
+	track("SR.Value", SR, "Value")
 	local LB = new("Frame", { Position = UDim2.new() })
 	track("LB.Position", LB, "Position")
+	local LT = new("Frame", { Position = UDim2.new() })
+	track("LT.Position", LT, "Position")
+	local TL = new("Frame", { Position = UDim2.new() })
+	track("TL.Position", TL, "Position")
+	local LG = new("Frame", { Position = UDim2.new() })
+	track("LG.Position", LG, "Position")
 
 	for _, name in r.order do
 		if name ~= "R" then
@@ -496,6 +534,13 @@ local function semantics(data)
 	end
 	r.probe()
 	LB:TweenPosition(UDim2.fromOffset(200, 0), Direction.Out, Style.Linear, 1, false, r.callback("LB"))
+	LT:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 1, false, r.callback("LT"))
+	create("LTS", LT, linear(1), { Position = UDim2.fromOffset(0, 100) }):Play()
+	create("TLS", TL, linear(1), { Position = UDim2.fromOffset(0, 100) }):Play()
+	TL:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 1, false, r.callback("TL"))
+	LG:TweenPosition(UDim2.fromOffset(100, 0), Direction.Out, Style.Linear, 0.5, false, r.callback("LG"))
+	SN.Value = 40
+	LG.Position = UDim2.fromOffset(0, 40)
 
 	local errors = {}
 	for _, case in {
@@ -552,9 +597,20 @@ local function semantics(data)
 			r.tweens.DLY:Destroy()
 			r.tweens.DLY = nil
 		end },
+		{ at = 0.1, name = "SD:set(delay)", fn = function()
+			SD.Value = 50
+		end },
+		{ at = 0.5, name = "SR:set(repeat delay)", fn = function()
+			SR.Value = 30
+		end },
 		{ at = 0.2, name = "PA:Pause", fn = function()
 			r.tweens.PA:Pause()
 			return r.tweens.PA.PlaybackState.Name
+		end },
+		{ at = 0.2, name = "RA:Pause+Play", fn = function()
+			r.tweens.RA:Pause()
+			r.tweens.RA:Play()
+			return r.tweens.RA.PlaybackState.Name
 		end },
 		{ at = 0.3, name = "P2:Play(delayed takeover)", prepare = function()
 			return create("P2", P, linear(0.2, 0.3), { Value = 500 })
