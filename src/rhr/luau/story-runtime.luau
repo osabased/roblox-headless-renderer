@@ -97,7 +97,7 @@ function storyTask.defer(fn, ...)
 end
 function storyTask.delay(seconds, fn, ...)
 	local thread = threadOf(fn)
-	sleep(seconds, { thread = thread, args = table.pack(...) })
+	sleep(seconds, { thread = thread, args = table.pack(...), fn = if type(fn) == "function" then fn else nil })
 	return thread
 end
 function storyTask.wait(seconds)
@@ -760,6 +760,7 @@ local PASS_FILE = outPath .. ".pass.rbxm"
 local FIELDS = { { "s", "AbsoluteSize" }, { "p", "AbsolutePosition" }, { "c", "AbsoluteContentSize" },
 	{ "t", "TextBounds" }, { "cs", "AbsoluteCanvasSize" }, { "w", "AbsoluteWindowSize" } }
 local passes = { count = 0, settles = {}, changed = 0, seconds = 0, unresolved = 0 }
+local passScreen = nil -- the screen as the last pass saved it
 
 -- Lune keeps a legacy `Font = Enum.Font.X` as an EnumItem it cannot save: as a FontFace.
 -- Roblox keeps whichever of the two was set last, which Lune does not record; UI
@@ -816,7 +817,8 @@ local function layoutPass()
 	local copy = screen:Clone()
 	fixFonts(copy)
 	local okSave, saveProblem = pcall(function()
-		fs.writeFile(PASS_FILE, roblox.serializeModel({ copy }))
+		passScreen = roblox.serializeModel({ copy })
+		fs.writeFile(PASS_FILE, passScreen)
 	end)
 	copy:Destroy()
 	if not okSave then
@@ -991,10 +993,182 @@ end
 if not mounted then
 	stdio.ewrite(`the story was still mounting after {MOUNT_FRAMES / 60} s of story time; saved what it had built\n`)
 end
-for _ = 1, 30 do
+
+-- Capture ---------------------------------------------------------------------------
+-- The story is saved once it has settled: at least MIN_FRAMES frames after it mounted,
+-- its screen unchanged for STILL_FRAMES frames in a row, no tween playing or waiting
+-- out a delay, and no timer due before the cap. At CAP_SECONDS of story time it is saved
+-- as it is. RHR-MOTION reports when the story was saved and what was still moving.
+local MIN_FRAMES, STILL_FRAMES, CAP_SECONDS = 30, 10, 5
+
+local function screenBytes(fresh)
+	if SIZES and not fresh then
+		return passScreen
+	end
+	local copy = screen:Clone()
+	fixFonts(copy)
+	local okSave, bytes = pcall(roblox.serializeModel, { copy })
+	copy:Destroy()
+	return if okSave then bytes else nil
+end
+
+local function timersBefore(limit)
+	local due = {}
+	for _, entry in sleeping do
+		if pending[entry.thread] == entry and entry.due < limit then
+			table.insert(due, entry)
+		end
+	end
+	return due
+end
+
+-- A story's modules are chunks named `[string "<full name>"]`; a place is `<full name>:<line>`,
+-- which rhr.story points at the file.
+local function place(source, line)
+	return `{string.match(source, '^%[string "(.*)"%]$') or source}:{line}`
+end
+
+-- Where a waiting thread waits: the first line outside this runtime.
+local RUNTIME_SOURCE = debug.info(1, "s")
+local function waitingAt(thread)
+	for level = 1, 20 do
+		local source, line = debug.info(thread, level, "sl")
+		if source == nil then
+			return nil
+		end
+		if source ~= RUNTIME_SOURCE and source ~= "[C]" then
+			return place(source, line)
+		end
+	end
+	return nil
+end
+
+-- What the story can set on each element, to name what changed between two frames.
+local database = roblox.getReflectionDatabase()
+local settable = {}
+local function settableOf(className)
+	local names = settable[className]
+	if names == nil then
+		names = {}
+		local class = database:FindClass(className)
+		while class do
+			for name, property in class.Properties do
+				if property.Scriptability == "ReadWrite" and not table.find(property.Tags, "Hidden")
+					and not table.find(property.Tags, "Deprecated") then
+					table.insert(names, name)
+				end
+			end
+			class = class.Superclass and database:FindClass(class.Superclass)
+		end
+		table.sort(names)
+		settable[className] = names
+	end
+	return names
+end
+local function propertyValues()
+	local values = {}
+	for path, instance in pathIndex(screen) do
+		local byName = {}
+		for _, property in settableOf(instance.ClassName) do
+			local okRead, value = pcall(read, instance, property)
+			if okRead then
+				byName[property] = value
+			end
+		end
+		values[path] = byName
+	end
+	return values
+end
+local function onScreen(path)
+	return string.match(path, "^[^/]*/(.+)$") or path
+end
+local function changes(before, after)
+	local list = {}
+	for path, values in after do
+		local was = before[path]
+		local names = {}
+		if was == nil then
+			table.insert(names, "(added)")
+		else
+			for property, value in values do
+				local old = was[property]
+				if old ~= value and (old == old or value == value) then
+					table.insert(names, property)
+				end
+			end
+			table.sort(names)
+		end
+		if #names > 0 then
+			table.insert(list, { path = onScreen(path), properties = names })
+		end
+	end
+	for path in before do
+		if after[path] == nil then
+			table.insert(list, { path = onScreen(path), properties = { "(removed)" } })
+		end
+	end
+	table.sort(list, function(a, b)
+		return a.path < b.path
+	end)
+	return list
+end
+
+local mountFrame = storyFrame
+local still, lastBytes = 0, nil
+local motion = { settled = false }
+local capFrame = math.max(math.round(CAP_SECONDS * 60), mountFrame + MIN_FRAMES)
+local before = nil
+while true do
+	if storyFrame >= mountFrame + MIN_FRAMES and still >= STILL_FRAMES and #tweens.moving() == 0
+		and #timersBefore(capFrame / 60) == 0 then
+		-- A pass saves the screen before the frame's timers and Heartbeat run, so the
+		-- screen as the frame left it must match it too: a timer in this frame may
+		-- have started a motion of its own.
+		if not SIZES or screenBytes(true) == lastBytes then
+			motion.settled = true
+			break
+		end
+		still = 0
+	end
+	if storyFrame >= capFrame then
+		break
+	end
+	if storyFrame + 1 == capFrame then
+		before = propertyValues()
+	end
 	frame()
+	-- Without layout passes the screen is saved only for the frames the rule reads.
+	local bytes = if SIZES or storyFrame >= mountFrame + MIN_FRAMES - STILL_FRAMES then screenBytes() else nil
+	still = if bytes ~= nil and bytes == lastBytes then still + 1 else 0
+	lastBytes = bytes
+end
+if not motion.settled and before then
+	motion.changing = changes(before, propertyValues())
 end
 settle()
+
+local paths = {}
+for path, instance in pathIndex(screen) do
+	paths[instance] = onScreen(path)
+end
+motion.time = now()
+motion.frames = storyFrame
+motion.mount = mountFrame / 60
+motion.moving = {}
+for _, entry in tweens.moving() do
+	local instance = entry.instance
+	table.insert(motion.moving, { path = paths[instance] or instance:GetFullName(), properties = entry.properties,
+		forever = entry.forever })
+end
+motion.timers = {}
+for _, entry in timersBefore(math.huge) do
+	local at = if entry.fn then place(debug.info(entry.fn, "sl")) else waitingAt(entry.thread)
+	table.insert(motion.timers, { due = entry.due, at = at })
+end
+table.sort(motion.timers, function(a, b)
+	return a.due < b.due
+end)
+print("RHR-MOTION " .. serde.encode("json", motion))
 
 fixFonts(screen)
 local okSave, saveProblem = pcall(function()
