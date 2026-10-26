@@ -611,7 +611,16 @@ return function(hooks)
 			local written = if property == "Transparency" and instance:IsA("GuiObject")
 				then "BackgroundTransparency"
 				else property
-			table.insert(list, { property = written, value = value, integer = typeName == "int" or typeName == "int64" })
+			-- A whole-number goal is kept as setting it would leave it: an int drops its
+			-- fraction (semantics.json: INT2), and an int64 rounds, as IntValue.Value's
+			-- setter does (a tween to a fractional int64 is not measured).
+			local integer = typeName == "int" or typeName == "int64"
+			if typeName == "int" then
+				value = trunc(value)
+			elseif typeName == "int64" then
+				value = roundAway(value)
+			end
+			table.insert(list, { property = written, value = value, integer = integer })
 		end
 		table.sort(list, function(a, b)
 			return a.property < b.property
