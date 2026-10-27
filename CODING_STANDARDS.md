@@ -14,10 +14,12 @@ The client recording's re-read is the pattern: it reads a missed value `PROBE_ER
 earlier and later (how far Studio rounds a probe's progress), only in that recording,
 and a value that matches only there is noted, not passed silently.
 
-Why: a loosening written for one case quietly stops checking every other one. b6d6f41
-compared the callbacks on each step by name, in every recording, to cover three tweens
-whose order it could not model, and that hid a wrong order in another case (LQ).
-`in_order` in `tests/test_tween.py` now sorts only a consecutive LB, LT, TL triple.
+Why: a loosening written for some cases quietly stops checking every other one. b6d6f41
+could not model the callback order of two groups of legacy tweens (LQ2 to LQ4, and LB,
+LT, TL), and sorted the callbacks on each step by name in every recording (`by_time`).
+So RHR's call order passed for LQ, though Tweens' queue, tried in d2fbe0f, gives
+Studio's order exactly. `in_order` in `tests/test_tween.py` now sorts only a
+consecutive LB, LT, TL triple.
 
 ## A claim about Roblox is cited and checked
 
@@ -28,8 +30,9 @@ What RHR does differently from Roblox goes in `docs/known-approximations.md`.
 
 Why: a claim reads as settled and stops the next person looking. b6d6f41 cited LQ and
 said no queue kept the Tweens' way gives its order; trying that queue in d2fbe0f gave
-exactly LQ's order. The `retire` comment in `src/rhr/luau/tween.luau` shows the form,
-and d2fbe0f's message lists what each rule gave for LB, LT and TL.
+exactly LQ's order. The `retire` comment in `src/rhr/luau/tween.luau` shows the form.
+d2fbe0f's message gives the order two rules gave for LB, LT and TL, but not the other
+rules tried, which this rule now asks for.
 
 ## Comments say what the code does now
 
