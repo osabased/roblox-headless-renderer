@@ -40,32 +40,41 @@ def check(ok: bool, message: str) -> None:
         failures.append(message)
 
 
-def process_table() -> dict[int, int]:
-    """{pid: parent pid} of every running process."""
+def process_table() -> dict[int, tuple[int, str, str]]:
+    """{pid: (parent pid, start time, name)} of every running process."""
+    table = {}
     if sys.platform == "win32":
-        script = ("Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }")
+        script = ("Get-CimInstance Win32_Process | ForEach-Object "
+                  "{ \"$($_.ProcessId)|$($_.ParentProcessId)|$($_.CreationDate.Ticks)|$($_.Name)\" }")
         out = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True,
                              text=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW).stdout
+        rows = [line.split("|", 3) for line in out.splitlines()]
     else:
-        out = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True, text=True, timeout=30).stdout
-    table = {}
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            table[int(parts[0])] = int(parts[1])
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,lstart=,comm="], capture_output=True, text=True,
+                             timeout=30).stdout
+        rows = [[*parts[:2], " ".join(parts[2:7]), " ".join(parts[7:])] for parts in map(str.split, out.splitlines())]
+    for row in rows:
+        if len(row) == 4 and row[0].isdigit() and row[1].isdigit():
+            table[int(row[0])] = (int(row[1]), row[2], row[3])
     return table
 
 
-def tree(root: int) -> set[int]:
-    """`root` and every process below it."""
+# A PID the killed browser frees can be given to a new process during the wait (on Windows
+# soon), so a process is its PID and start time.
+def alive() -> set[tuple[int, str]]:
+    return {(pid, started) for pid, (_, started, _) in process_table().items()}
+
+
+def tree(root: int) -> dict[tuple[int, str], str]:
+    """`root` and every process below it: {(pid, start time): name}."""
     table = process_table()
     found = {root} if root in table else set()
     grew = True
     while grew:
-        more = {pid for pid, parent in table.items() if parent in found} - found
+        more = {pid for pid, (parent, _, _) in table.items() if parent in found} - found
         found |= more
         grew = bool(more)
-    return found
+    return {(pid, table[pid][1]): table[pid][2] for pid in found}
 
 
 def main() -> int:
@@ -86,11 +95,14 @@ def main() -> int:
     deadline = time.monotonic() + 15
     left = running
     while time.monotonic() < deadline:
-        left = running & set(process_table())
+        now = alive()
+        left = {key: name for key, name in running.items() if key in now}
         if not left:
             break
         time.sleep(0.5)
-    check(not left, f"every browser process ends with the process that started it ({len(left)} left)")
+    named = ", ".join(f"{name} {pid}" for (pid, _), name in sorted(left.items()))
+    check(not left, f"every browser process ends with the process that started it ({len(left)} left"
+                    + (f": {named})" if left else ")"))
 
     # The killed process could not remove its profile; the next launch does.
     from rhr import cdp

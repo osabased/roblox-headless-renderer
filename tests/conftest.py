@@ -81,6 +81,7 @@ BROWSER = {
 NOT_LUNE = {
     "test_compare", "test_groundtruth_diff", "test_mesh_assets", "test_project", "test_roblox_assets", "test_cache",
     "test_scroll_scale", "test_text_newlines", "test_textscaled_stroke", "test_browsers", "test_browser_lifetime", "test_large_place",
+    "test_changelog",
 }
 STUDIO = {"test_studio_smoke"}
 SMOKE = {
@@ -88,6 +89,7 @@ SMOKE = {
     "test_ir_profiles", "test_ir_cache",                                      # file conversion
     "test_preview", "test_scene_highlight", "test_scene_vfx",                 # 3D
     "test_tools", "test_cache", "test_browsers",                              # tools, cache, browsers
+    "test_changelog",                                                         # release notes
 }
 
 
