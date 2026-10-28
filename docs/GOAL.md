@@ -54,11 +54,13 @@ of truth and structured findings rather than only pixels.
 - Not an editor: RHR looks and never changes a file (not in 1.0).
 - Not a Roblox engine: no physics or gameplay. Motion is shown as sampled,
   deterministic moments (a story settled or at `--story-time`, an effect at
-  `--effect-time`), not played back. The one input where RHR runs code is a story,
-  which it runs to see the UI the code builds.
+  `--effect-time`), not played back. In 1.0 the one input where RHR runs code is a
+  story, which it runs to see the UI the code builds; what runs after 1.0 is in "After
+  1.0: Roblox UI emulation".
 - Not a Studio companion: no live connection to a running Studio. Reading the
   install's files and its saved login is not one; Studio need not be running.
-- Not a pixel-perfect copy of Studio's renderer.
+- Not a pixel-perfect copy of Studio's renderer in 1.0. After 1.0, screen UI's pixels
+  are measured against Studio's and brought closer; 3D stays a close approximation.
 
 ## Feature status
 
@@ -105,7 +107,35 @@ exit codes happens before the freeze. Anything additive or internal can land aft
 **After 1.0:** visual regression of stories in CI, a structural diff of Roblox files
 (also as a `git diff` driver), place versions, pseudo-localisation; later a compact
 IR, instanced geometry for huge places, glTF export, animated effects. A native
-renderer only if Chromium ever blocks a platform.
+renderer only if Chromium ever blocks a platform. The UI emulation track is the next
+section.
+
+## After 1.0: Roblox UI emulation (decided 2026-10-28)
+
+1.0 comes first, and its interface freezes as planned. After it, RHR's screen UI aims to
+look and behave as Roblox's does, measured against Studio rather than judged by eye.
+
+- **Pixels, measured.** A corpus of Studio screenshots of screen UI at several viewports,
+  devices and pixel densities, with fixtures held out from tuning. It is recorded during
+  the freeze, in the same Studio sessions as Phase 4's side-by-side. It is scored with
+  `scripts/groundtruth/diff.py`: the share of pixels whose colour matches Studio's
+  exactly, within 2/255 and within 8/255 on every channel. The target share is written
+  here once a first baseline is measured. The layout bar stays the floor: every rect
+  within 2 px of Studio (`tests/test_studio_truth.py`), and no change may lose it.
+- **Interaction.** Clicks, hover, scrolling and typing at chosen frames of a story. The
+  hit map's click rules, measured in Studio, decide which element a click reaches. Still
+  sampled, deterministic moments, not a live session.
+- **A game's own client code, later.** LocalScripts and the modules they require, run
+  against PlayerGui in a sandbox, so UI a game builds at run time can be shown without a
+  story.
+- **Left out:** a live, interactive preview; physics and gameplay; pixel accuracy in 3D.
+
+Each piece is built the way story tweens were: Studio is recorded first, a test checks
+RHR against the recording, and then RHR is changed until it passes.
+
+The ordering rule holds: nothing here changes a 1.0 JSON shape, default, flag meaning or
+exit code. Interaction and client code are new inputs and flags; a pixel-density option,
+if one is needed, defaults to today's 1x. Each piece lands in a 1.x release.
 
 ## Standing decisions
 
