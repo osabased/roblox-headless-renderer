@@ -59,7 +59,10 @@ def batch(tmp: Path) -> None:
     print("a batch of two fixture models")
     proc = subprocess.run([sys.executable, "-m", "rhr", "icons", *map(str, MODELS), "--out-dir", str(tmp / "icons"),
                            "--size", "256", "--offline"], capture_output=True, text=True, encoding="utf-8", timeout=600)
-    check(proc.returncode == 0, f"exit code {proc.returncode}: {proc.stderr.strip().splitlines()[-1:]}")
+    check(proc.returncode == 0, f"exit code {proc.returncode}")
+    if proc.returncode:
+        for line in proc.stderr.strip().splitlines()[-15:]:
+            print(f"       {line}")
     for model in MODELS:
         path = tmp / "icons" / f"{model.stem}.png"
         check(path.is_file(), f"{path.name} written")
