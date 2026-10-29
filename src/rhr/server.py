@@ -242,8 +242,10 @@ class Server:
                 # The reply goes before stop(): once the listener closes, serve() returns
                 # and the process can end before this daemon thread has sent anything.
                 if request.get("argv") == ["server", "stop"]:
-                    _send(connection, b"x", b"0")
-                    self.stop()
+                    try:
+                        _send(connection, b"x", b"0")
+                    finally:
+                        self.stop()
                     return
                 acquired = self.busy.acquire(timeout=WAIT_S) if WAIT_S > 0 else self.busy.acquire(blocking=False)
                 if not acquired:
@@ -255,8 +257,10 @@ class Server:
                     return
                 try:
                     if code_stamp() != self.stamp:
-                        _send(connection, b"s", b"")
-                        self.stop()
+                        try:
+                            _send(connection, b"s", b"")
+                        finally:
+                            self.stop()
                         return
                     connection.settimeout(None)
                     self._run(connection, request)
