@@ -69,7 +69,7 @@ of truth and structured findings rather than only pixels.
 | UI picture, layout numbers, findings, clickable regions | `ui`, `layout`, `check`, `hitmap` | Core (layout within 2 px of Studio; findings being tuned for precision in Phase 1) |
 | UI built by code | stories through the UI commands | **Experimental in 1.0** |
 | 3D picture, camera controls | `scene` | Core |
-| 3D facts | `scene-dump` | Core (output size reworked before 1.0) |
+| 3D facts | `scene-dump` | Core (a summary by default; `--parts` for every part) |
 | World, in-world UI and screen UI together | `preview` | Core |
 | Roblox materials, sky, surfaces, unions, terrain, characters | `scene`, `preview` | Core (checked side by side with Studio) |
 | Particles, Beams, Trails, Atmosphere, lights | `scene`, `preview` | Approximate, one still frame |
@@ -90,15 +90,14 @@ Detail, findings and numbers: docs/road-to-1.0.md. In short:
 2. **Output an agent can use:** every default JSON within a size budget
    (`scene-dump` a summary by default), `--device` and a 1920x1080 default viewport,
    `hitmap --at`, AGENTS.md and a `SKILL.md`. Then **1.0.0rc1**.
-3. **Speed the agent feels:** a native `rhr` client, `rhr batch`, several views of
-   one built scene.
+3. **Speed the agent feels:** `rhr batch`, several views of one built scene.
 4. **Dogfood and freeze:** daily use from agents on real projects, the Studio
    side-by-side, a real Mac and a cloud agent; then **1.0.0**.
 
 **Decided 2026-09-28:** `--view front` means Roblox's Front (-Z), and with `--focus`
 the model's own front; findings gain an `info` severity; nothing to draw exits 2 with
-a hint; hit map semantics follow a Studio measurement; the native client ships in 1.0
-if CI is green.
+a hint; hit map semantics follow a Studio measurement; a native client comes after 1.0,
+and only if asked for.
 
 **The ordering rule:** anything that changes JSON shapes, defaults, flag meanings or
 exit codes happens before the freeze. Anything additive or internal can land after
@@ -144,8 +143,8 @@ if one is needed, defaults to today's 1x. Each piece lands in a 1.x release.
   downloaded only when none is found. A native renderer was investigated and is not
   worth it (docs/renderer-options.md).
 - **The UI engine is RHR's own code** (a fork of pinevex-renderer).
-- **A resident server** runs commands so Python and loaded files stay warm; the
-  native client comes in Phase 3.
+- **A resident server** runs commands so Python and loaded files stay warm. A native
+  client comes after 1.0, and only if asked for.
 - **No pushes, CI runs or releases until the maintainer agrees**, each time. Work
   lands as local commits on `main`.
 

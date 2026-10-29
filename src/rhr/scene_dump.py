@@ -575,11 +575,11 @@ def build_scene_dump(
     return dump
 
 
-# Rough approximations (docs/GOAL.md): present in the render, but not to be trusted
-# the way Part geometry, cameras and UI layout are. Meshes, unions, Sky, terrain and
-# effects (particles, Beams, Trails, Highlights) are not listed: they are compared with
-# Studio, a missing mesh or union is a geometry fallback instead, and effects report
-# their own notes (what was drawn, and what a script plays).
+# Rough approximations (docs/known-approximations.md): present in the render, but not
+# to be trusted the way Part geometry, cameras and UI layout are. Meshes, unions, Sky,
+# terrain and effects (particles, Beams, Trails, Highlights) are not listed: they are
+# compared with Studio, a missing mesh or union is a geometry fallback instead, and
+# effects report their own notes (what was drawn, and what a script plays).
 EXPERIMENTAL_CLASSES = (
     "Atmosphere", "BloomEffect", "ColorCorrectionEffect", "Decal",
     "PointLight", "SpotLight", "SurfaceLight", "Texture",

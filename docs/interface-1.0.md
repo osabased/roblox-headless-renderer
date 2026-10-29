@@ -2,12 +2,13 @@
 
 What RHR promises from 1.0 on, and what changes before then. After 1.0, anything
 listed as **contract** here changes only in a major version; everything else may change
-in any release. Status: **decided 2026-09-27** (proposed 2026-09-26); the changes are
-in the Unreleased section of the CHANGELOG. Browser items (`RHR_BROWSER`, `setup
---browser`, the browser in reports) land with RHR's own browser client.
+in any release. Status: **decided 2026-09-27** (proposed 2026-09-26); the changes
+shipped in 1.0.0rc1 (see the CHANGELOG), browser items (`RHR_BROWSER`, `setup
+--browser`, the browser in reports) with RHR's own browser client.
 
 Taken from the code as of v0.7.0 (argparse, `rhr.schema.VERSIONS`, real outputs on the
-test fixtures).
+test fixtures), so "Now" and "Today" below mean v0.7.0. tests/test_contract.py holds
+the interface as it is.
 
 ## Rules for the whole interface
 
@@ -81,8 +82,8 @@ test fixtures).
 - **`--offline`**: stays on the commands that download before drawing (`ui`,
   `scene`, `preview`). The data commands never download, so they do not need it.
 - **`render --dump-layout`**: keep (one run gives the picture and the numbers).
-- **Defaults kept as contract:** `--viewport 1615x1080`, `--topbar-height 58`, shadows
-  on, effects on at their fullest moment, `--seed 0`.
+- **Defaults kept as contract:** `--viewport 1920x1080` (Phase 2), `--topbar-height
+  58`, shadows on, effects on at their fullest moment, `--seed 0`.
 
 ## Check severities (decided 2026-09-28)
 
@@ -121,7 +122,7 @@ or flag is allowed and printed. After an intentional change:
 
 | Variable | Proposal |
 |---|---|
-| `RHR_OFFLINE`, `RHR_CACHE_DIR`, `RHR_CACHE_LIMIT_MB`, `RHR_WEBGL`, `RHR_BROWSER_SANDBOX`, `RHR_PERSISTENT_BROWSER`, `RHR_BROWSER_IDLE_S`, `RHR_SERVER`, `RHR_SERVER_IDLE_S`, `RHR_SERVER_MEMORY_MB`, `RHR_SERVER_WAIT_S`, `RHR_PROFILE`, `RHR_STUDIO_DIR` | contract, documented in the README |
+| `RHR_OFFLINE`, `RHR_CACHE_DIR`, `RHR_CACHE_LIMIT_MB`, `RHR_WEBGL`, `RHR_BROWSER_SANDBOX`, `RHR_PERSISTENT_BROWSER`, `RHR_BROWSER_IDLE_S`, `RHR_SERVER`, `RHR_SERVER_IDLE_S`, `RHR_SERVER_MEMORY_MB`, `RHR_SERVER_WAIT_S`, `RHR_PROFILE`, `RHR_STUDIO_DIR` | contract |
 | `RHR_CHROME` | becomes **`RHR_BROWSER`** (any Chromium-family browser); `RHR_CHROME` still read for one release |
 | new: `RHR_BROWSER_DOWNLOAD=0` | never download a browser; fail with a clear message instead |
 | new: `RHR_TOOL_DOWNLOAD=0` | never download Lune or Rojo on first use (added with step 5); `RHR_OFFLINE=1` / `--offline` turns off every download, these two only one kind |

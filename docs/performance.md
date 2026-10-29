@@ -102,11 +102,12 @@ What is left, largest first:
 - **Process start is most of a small command.** The server answers `check` on a
   small UI in ~45 ms; starting Python and pip's `rhr.exe` launcher cost 150-200 ms
   (much more when the machine is loaded). Only a native client (a few-KB executable
-  that talks to the server) would remove that.
-- **A 3D render of an unchanged file rebuilds the scene.** Keeping the built scene on
-  the warm page when only the camera changes (another `--view`) would make those
-  renders a camera move and a frame.
+  that talks to the server) would remove that; it comes after 1.0, and only if asked
+  for (docs/road-to-1.0.md, section 8). `rhr batch` runs several commands for one
+  start.
+- **A 3D render of an unchanged file rebuilds the scene.** `scene --views` draws
+  several cameras on one build; separate `scene` commands still build it once each.
 - **The full conversion** (`scene-dump`, `ir`) of a 116k-part place is ~20 s after an
-  edit, and its JSON is ~240 MB; `scene-dump` on such a place prints every part.
+  edit, and its JSON is ~240 MB. `scene-dump` prints only a summary of it by default.
 - **XML files** still convert through Lune (kept running in the server, ~55 ms for a
   small model); a Python reader like the binary one would make them as fast.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RHR against ground truth that Roblox Studio recorded (docs/GOAL.md, Step 5).
+"""RHR against ground truth that Roblox Studio recorded (docs/GOAL.md's accuracy bar).
 
 Every place in tests/studio/ was built in Studio and carries ServerStorage.RHRTruth,
 written there by scripts/studio/export_truth.luau: Studio's own AbsolutePosition /

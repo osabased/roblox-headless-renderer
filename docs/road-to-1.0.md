@@ -3,8 +3,8 @@
 **Status: agreed, 2026-09-28.** Written as a proposal after reading all of the code and
 docs, running RHR on the maintainer's real files (the Downloads places, the story spike,
 the ProjectA game repo), and looking at what else exists; the maintainer accepted every
-recommendation in section 8 the same day. This is now the plan to 1.0: where it and
-docs/plan-1.0.md or docs/GOAL.md disagree, this document wins.
+recommendation in section 8 the same day. This is now the plan to 1.0; where it and
+docs/GOAL.md disagree, GOAL.md wins. Sections 2 to 4 are a snapshot of 2026-09-28.
 
 ## In short
 
@@ -265,7 +265,7 @@ wire format, shipped in platform wheels with the Python client as fallback; mean
 Python client answers `--version` and `--help` itself, and `rhr batch` runs several
 commands in one call (`check`, `layout`, `ui` of the same file is the usual trio). Not
 interface: can follow 1.0; recommended for 1.0 if the platform wheels are green in CI.
-*M-L.*
+*M-L.* (Section 8 changed this: the native client comes after 1.0, only if asked for.)
 
 **F13. The server runs one command at a time.** A second command while one runs goes
 cold in its own process: full imports, and big files read again. Agents run sub-agents
@@ -342,7 +342,8 @@ API key path first-class (Roblox recommends Open Cloud credentials for tools). *
 ### 4.9 Docs and process
 
 - GOAL.md still lists the MCP server, `render`, and an old feature table; the README
-  says "v0.7, early alpha"; the scope decided on 2026-09-27 is only in plan-1.0.md.
+  says "v0.7, early alpha"; the scope decided on 2026-09-27 is only in the step plan
+  of the time.
 - AGENTS.md needs the new loops: Rojo repo, partially managed repo with a place id,
   stories, CI. Ship it as an agent skill too (`SKILL.md` for Claude Code and Codex, the
   way ProjectA already loads its Roblox skills), and a copy-paste snippet for a project's
@@ -363,7 +364,8 @@ and the rest land when ready.
 **Process model.** `rhr` (client) -> resident server -> warm browser worker -> the kept
 page, which fetches the scene from a data server in the resident server. Keep it. Two
 changes: the server waits briefly instead of going cold when busy (F13), and the client
-becomes native (F12). Do not fold the browser worker into the server: being its own
+becomes native (F12; after 1.0, only if asked for, section 8). Do not fold the browser
+worker into the server: being its own
 process is what lets several RHR processes, and a future pool, share one warm browser.
 
 **The IR.** JSON with typed properties, about 25 times the size of a big place's file,
@@ -477,7 +479,7 @@ right.
 - Use RHR from agents every day: ProjectA (through its place), a story project, a
   Creator Store vetting session. Log each awkward moment as an issue; fix before the
   freeze.
-- The Studio side-by-side on a handful of real games (plan-1.0.md step 7.4).
+- The Studio side-by-side on a handful of real games.
 - Platform proof: a real Mac (Studio login included), the Linux container, one cloud
   agent with an API key.
 - Freeze: final contract snapshot, **1.0.0rc1**, a stretch with no interface change,

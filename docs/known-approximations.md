@@ -257,9 +257,8 @@ and Crop. Tile and Slice filtering have not been checked.
 
 Uses the same rectangles as `rhr layout`. An element counts as interactive when it
 is a button, a TextBox, or has `Active` or `Selectable` set. Each report probes the
-centre of every interactive element and names the topmost `Active` element as the
-target. A hidden (`Visible = false`) `Active` element is kept on purpose: an
-invisible element that swallows clicks is exactly the bug this command is for.
+centre of every interactive element and names the element that gets a click there,
+by the rules measured in Studio (Hit map: who gets a click, below).
 
 ## 3D scenes
 

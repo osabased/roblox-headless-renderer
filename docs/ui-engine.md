@@ -47,5 +47,6 @@ defaulted to).
 
 The engine is ordinary RHR code: fix it in place, with a fixture or focused test that
 fails before the fix (the rule `patches/README.md` set, which still holds).
-`tests/test_render_regression.py` and the Studio-measured fixtures in `tests/studio/`
-catch unintended changes to layout and pixels.
+`tests/test_studio_truth.py` checks layout against the Studio-measured places in
+`tests/studio/`, and the tests named in docs/known-approximations.md check each
+Studio-measured feature (gradients, scroll bars, notches, ZIndexBehavior).

@@ -117,4 +117,7 @@ family Playwright uses), so tests still draw identical pixels.
 - About a week of work, with low risk: same browser, same page, same pixels, and the
   current tests compare them.
 
-Planned for 1.0, together with Option 2 (see docs/GOAL.md).
+Built on 2026-09-27, together with Option 2 (`src/rhr/cdp.py`, `src/rhr/browsers.py`).
+On the maintainer's Windows machine, eight scenes drew the same pixels with the new
+client as with Playwright (software WebGL), and a cold render of the tower at 800x600
+took 4.63 s instead of 6.37 s.

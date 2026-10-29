@@ -8,7 +8,8 @@ scripts/studio/export_truth.luau. RHR lays the place out on the same viewport
 (edit mode has no top bar, so --topbar-height defaults to 0) and every visible
 GuiObject's rect must match Studio's AbsolutePosition/AbsoluteSize within
 --tolerance pixels; every part's position and size must match within
---stud-tolerance. The bar is "roughly right" (docs/GOAL.md), not pixel identity.
+--stud-tolerance. The bar is UI layout within 2 px of Studio (docs/GOAL.md), not
+pixel identity.
 
 Text objects sized by their text (AutomaticSize on a TextLabel/TextButton/TextBox)
 also get --text-tolerance (a fraction of the rect's larger side): glyph widths at
