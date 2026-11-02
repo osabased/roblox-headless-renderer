@@ -622,7 +622,8 @@ def _skill(args) -> int:
         return 0
     target = Path(args.install).expanduser() / "rhr" / "SKILL.md"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
+    # LF as shipped: write_text would give the copy Windows line endings.
+    target.write_text(text, encoding="utf-8", newline="\n")
     print(target)
     return 0
 
