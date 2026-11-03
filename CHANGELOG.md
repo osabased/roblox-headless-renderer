@@ -1,5 +1,108 @@
 # Changelog
 
+## 1.0.0rc1+osabased.16 (fork)
+
+1.0.0rc1+osabased.15 with outputs that fit an agent's shell, and an exit 2 wherever a
+command had nothing to show.
+
+### When upgrading
+
+- **A list that grows with the file is cut to fit stdout**, under 30,000 characters
+  (where Claude Code cuts a command's output, counting UTF-16 units: an emoji is two):
+  `layout` rects and `layout --rich` nodes, nearest the top of the tree first; `check`
+  findings, at most 10 of each check, the most severe first; `hitmap` nodes and hit
+  tests; `inspect` findings, at most 10 of each check, its flagged scripts, and its
+  roots, the first 40; the `missingAssets` of `ui`, `scene` and `preview --json`, the
+  first 40. The document counts exactly what it left out (`moreRects`, `moreNodes`,
+  `moreHitTests`, `moreFindings`, `moreScripts`, `moreRoots`, `moreMissingAssets`),
+  `layout` and `hitmap` name the paths the rest is under (`cut`: for each row left
+  out, the deepest of its path and its ancestors that the kept rows reach, such as the
+  list a hitmap's left-out buttons are in), `check` and `inspect` count every finding
+  by check (`findingCounts`), and stderr says what was cut. `--all` prints every row. On `layout`, `check`, `hitmap` and `inspect`, `--out`
+  writes the default document uncut: every rect and finding, every visible element
+  (`--all` adds the hidden ones), and on `inspect` the flagged scripts, 25 ids per
+  asset kind and every root (`--all` lists every script and asset id, and carries
+  `scriptsTotal` and `assetCounts` too). On `ui`,
+  `scene` and `preview`, `--out` is the PNG and only `--all` lists every missing asset
+  (`ui --dump-layout` writes every rect, with `moreRects: 0` and `cut: []`). A row too
+  long for stdout on its own (a label of 30,000 characters) is kept with each string
+  over 200 characters cut to 200, but never an instance path (`path`, `paths`,
+  `stack`, `target`), and `shortened` names each such field with its full length.
+  The `hitmap` stderr line counts every node and probe point, and a note says of each
+  list that was cut how much stdout kept. `check`'s exit code still counts every
+  finding. Uncut (`--all`) and now, on the place
+  tests/test_output_budget.py builds (100,000 parts, 30 copies of the shop, 1,000
+  labels, 2,000 images), a world of 2,000 decals, and a model of 600 scripts:
+
+  | Output | `--all` | Default |
+  | --- | --- | --- |
+  | `layout` | 322,573 | 24,227 |
+  | `layout --rich` | 1,506,919 | 21,228 |
+  | `hitmap` | 892,685 | 19,121 |
+  | `inspect`, 600 scripts | 99,050 | 13,974 |
+  | `ui --json` | 407,888 | 12,066 |
+  | `check` | 566,598 | 8,181 |
+  | `scene-dump` | not cut (`--parts` lists every part) | 4,470 |
+  | `preview --json`, 2,000 decals | 161,523 | 3,792 |
+  | `scene --json`, 2,000 decals | 161,506 | 3,775 |
+
+- **A `--baseline` must be written with `--out`**: `rhr check <target> --out
+  before.json`. `--baseline` refuses stdout that was cut (exit 2), which would report
+  the findings it left out as new.
+- **`--all` no longer stands for `--all-guis`** on `ui`, `preview`, `layout` and
+  `check`, where argparse took the prefix for the one flag it matched: `--all` is a flag
+  of its own there now.
+- **Nothing to show exits 2**, with the reason: `check --path` naming no element (it
+  printed no findings, which read as a clean UI), or only hidden UI, which `check`
+  skips (`--show <path>` checks it as shown); `hitmap --path` over only hidden
+  elements, which take no clicks (`--all` lists them); `scene-dump` of a file with no
+  parts, terrain whose voxels were read and are not empty, sky, atmosphere, lights or
+  effects, in the world or in storage, and of a file whose only Terrain's voxels
+  (SmoothGrid) could not be read, saying why; a story that builds no UI that draws
+  (nothing, only layouts or Folders, or only hidden elements), on every command (it
+  drew a blank screen and checked clean): stderr names what it built, and a story
+  captured while a timer was still waiting says when the next is due and names
+  `--story-time`.
+
+### Added
+
+- tests/test_nothing_to_show.py: every command on each kind of input (UI only, 3D
+  only, an empty Model, scripts only, Rojo projects with only code or a missing
+  `$path`, a story that builds a label and one that builds nothing, cached and
+  uncached asset ids, place ids and links, a `--path` that names nothing, a label too
+  long for stdout, a `--path` over only hidden elements) shows something or exits 2
+  with a reason; a cut list is never empty while it counts rows left out.
+- tests/test_output_budget.py builds a place with a big UI as well (1,000 labels whose
+  text spills out of its box, 2,000 image buttons on ids that are not cached, 30 copies
+  of the shop), a world of 2,000 decals and a model of 600 scripts, 300 of them
+  flagged, and checks that each cut list counts exactly what it left out, that `cut`
+  names exactly where, and that `--out` writes every row of the default document and
+  `--all` every row.
+- tests/test_budget.py checks rhr.budget on its own, without a `rhr` process: which
+  rows a cut keeps, where `cut` says the rest went, what a row too big for stdout keeps
+  of its strings, and how a row's size is counted.
+- tests/test_story_empty.py: stories that build only a UIListLayout and a Folder, only
+  a hidden Frame, or a visible Frame inside a hidden one exit 2 and say what they
+  built; one that mounts from a `task.delay` exits 2 at an earlier `--story-time`,
+  naming the waiting timer, and draws at a later one.
+- tests/test_contract.py records `inspect`, `inspect --all`, and `layout`,
+  `layout --rich` and `hitmap` on a UI too big for stdout, so the `cut` rows and the
+  `shortened` marker are in the snapshot.
+
+### Fixed
+
+- **`scene` and `preview` of a world with no roots** failed with a page error; they
+  exit 2 with the reason.
+- The empty-story hint no longer says a story may return what it builds: only what it
+  parents to its target is drawn. It is given only when the story parented nothing and
+  no timer was still waiting.
+- **`hitmap --path` and `scene-dump --path` with a space or slash at an end**
+  (`Gui/Shop/`) found nothing, where `layout` and `check` took it. On all four the
+  spaces and slashes at its ends are dropped, and an empty `--path` is refused.
+- A Terrain the file holds no SmoothGrid for (a Rojo project's bare Terrain,
+  hand-written XML) is taken as the empty grid, and no longer counted in
+  `unsupportedVisualClasses`.
+
 ## 1.0.0rc1+osabased.15 (fork)
 
 1.0.0rc1+osabased.14 with tweens that play in stories.

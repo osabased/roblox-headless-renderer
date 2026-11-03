@@ -54,7 +54,8 @@ The checks, by id (the ids are part of the interface):
   max-visible-graphemes  info     a typewriter window over the text
 
 Leaving findings out: `--ignore <check>`; `--min-severity`; `--baseline old.json`
-(only findings not in an earlier `rhr check` output: "did my edit add a problem?");
+(only findings not in an earlier whole `rhr check` document, from --out or --all:
+"did my edit add a problem?"; stdout cut to fit, with `moreFindings`, is refused);
 and in the file, a string attribute `RhrIgnore` on any instance, "all" or check ids
 separated by commas, for that instance and everything in it.
 
@@ -581,8 +582,10 @@ def check_model(ir_path, width: int, height: int, topbar_height: float | None = 
                 min_severity: str = "warning", ignore: tuple[str, ...] = (), baseline: dict | None = None) -> dict:
     """The CLI's `rhr check`: the dump, its findings, and the ones left out.
 
-    Returns the rhr.check/1 document plus `_left_out`: how many findings each rule
-    left out (for the summary on stderr), popped by the caller.
+    Returns the rhr.check/1 document plus three keys the caller pops: `_left_out`,
+    how many findings each rule left out (for the summary on stderr); `_paths`, every
+    UI path checked; and `_hidden`, the hidden UI paths left unchecked, so a `--path`
+    naming only hidden UI is told apart from one naming nothing.
     """
     from rhr.ir import cached_ir, load_ir
     from rhr.layout_dump import build_dump
@@ -615,12 +618,38 @@ def check_model(ir_path, width: int, height: int, topbar_height: float | None = 
             kept.append(finding)
     document = stamp("check", {"model": dump["model"], "findings": kept})
     document["_left_out"] = left_out
+    document["_paths"] = [entry["path"] for entry in dump["nodes"]]
+    document["_hidden"] = _hidden_paths(ir)
     return document
+
+
+def _hidden_paths(ir: dict) -> list[str]:
+    """The UI the dump leaves out because it is hidden: each GUI node that is
+    `Visible = false` or `Enabled = false`, or inside one."""
+    from rhr.adapter import GUI_CLASSES, ui_branches
+
+    out: list[str] = []
+    branches = ui_branches(ir)
+
+    def walk(node: dict, inside: bool, hidden: bool) -> None:
+        props = node.get("props") or {}
+        is_gui = node.get("className") in GUI_CLASSES
+        hidden = hidden or (is_gui and (props.get("Visible") is False or props.get("Enabled") is False))
+        if hidden and is_gui:
+            out.append(node["path"])
+        inside = inside or is_gui
+        for child in node.get("children") or []:
+            if inside or id(child) in branches:
+                walk(child, inside, hidden)
+
+    for root in ir.get("roots") or []:
+        walk(root, False, False)
+    return out
 
 
 def _blocked_buttons(ir_path, width: int, height: int, topbar_height, dump: dict) -> list[dict]:
     """Buttons whose centre another element takes a click from (rhr.hitmap's rules)."""
-    from rhr.hitmap import build_hitmap
+    from rhr.hitmap import _centre, build_hitmap
 
     hitmap = build_hitmap(ir_path, width, height, topbar_height=topbar_height)
     targets = {(test["point"]["x"], test["point"]["y"]): test for test in hitmap["hitTests"]}
@@ -634,7 +663,7 @@ def _blocked_buttons(ir_path, width: int, height: int, topbar_height, dump: dict
         entry = by_path.get(node["path"])
         if entry is not None and _collapsed(entry, ctx):
             continue
-        test = targets.get((round(rect["x"] + rect["w"] / 2, 3), round(rect["y"] + rect["h"] / 2, 3)))
+        test = targets.get(_centre(rect))
         if test is None or test["target"] in (None, node["path"]):
             continue
         finding = {"paths": [node["path"], test["target"]]}
@@ -710,13 +739,18 @@ def _image_paths(ir: dict) -> set[str]:
 
 
 def load_baseline(path: Path) -> dict:
-    """An earlier `rhr check` output, for --baseline."""
+    """An earlier whole `rhr check` document (--out, or --all), for --baseline. Raises ValueError when
+    the file cannot be read, is not an rhr.check document, or is stdout cut to fit
+    (`moreFindings`), which would let the findings it left out read as new."""
     try:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"cannot read the baseline {path}: {exc}") from None
     if not str(document.get("schema", "")).startswith("rhr.check/"):
         raise ValueError(f"{path} is not an `rhr check` output (schema {document.get('schema')!r})")
+    if document.get("moreFindings"):
+        raise ValueError(f"{path} is `rhr check` stdout cut to fit ({document['moreFindings']} findings left "
+                         f"out): write the baseline with `rhr check <target> --out {path}`")
     return document
 
 

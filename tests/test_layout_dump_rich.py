@@ -193,7 +193,7 @@ def main() -> int:
     check(isinstance(cli_dump, dict) and len(cli_dump.get("nodes", [])) == 5,
           "the dump is valid JSON on stdout")
     if cli_dump is not None:
-        check(dump_json(cli_dump) == dump_json(dump),
+        check(dump_json(cli_dump) == dump_json({**dump, "moreNodes": 0, "cut": []}),
               "the CLI dump matches the library dump byte for byte")
         proc2 = subprocess.run(
             [*RHR, "layout", str(FIXTURES / "grid_offset.rbxmx"), "--viewport", "400x300", "--rich"],

@@ -34,6 +34,11 @@
   },
   "check": {
    "flags": {
+    "--all": {
+     "choices": [],
+     "default": false,
+     "takesValue": false
+    },
     "--all-guis": {
      "choices": [],
      "default": false,
@@ -93,6 +98,11 @@
     "--show": {
      "choices": [],
      "default": [],
+     "takesValue": true
+    },
+    "--story-time": {
+     "choices": [],
+     "default": null,
      "takesValue": true
     },
     "--topbar-height": {
@@ -223,6 +233,11 @@
      "default": [],
      "takesValue": true
     },
+    "--story-time": {
+     "choices": [],
+     "default": null,
+     "takesValue": true
+    },
     "--topbar-height": {
      "choices": [],
      "default": null,
@@ -343,6 +358,11 @@
   },
   "layout": {
    "flags": {
+    "--all": {
+     "choices": [],
+     "default": false,
+     "takesValue": false
+    },
     "--all-guis": {
      "choices": [],
      "default": false,
@@ -385,6 +405,11 @@
      "default": [],
      "takesValue": true
     },
+    "--story-time": {
+     "choices": [],
+     "default": null,
+     "takesValue": true
+    },
     "--topbar-height": {
      "choices": [],
      "default": null,
@@ -408,6 +433,11 @@
   },
   "preview": {
    "flags": {
+    "--all": {
+     "choices": [],
+     "default": false,
+     "takesValue": false
+    },
     "--all-guis": {
      "choices": [],
      "default": false,
@@ -500,6 +530,11 @@
      "default": [],
      "takesValue": true
     },
+    "--story-time": {
+     "choices": [],
+     "default": null,
+     "takesValue": true
+    },
     "--topbar-height": {
      "choices": [],
      "default": null,
@@ -535,6 +570,11 @@
   },
   "scene": {
    "flags": {
+    "--all": {
+     "choices": [],
+     "default": false,
+     "takesValue": false
+    },
     "--camera": {
      "choices": [],
      "default": null,
@@ -695,6 +735,11 @@
   },
   "ui": {
    "flags": {
+    "--all": {
+     "choices": [],
+     "default": false,
+     "takesValue": false
+    },
     "--all-guis": {
      "choices": [],
      "default": false,
@@ -770,6 +815,11 @@
     "--show": {
      "choices": [],
      "default": [],
+     "takesValue": true
+    },
+    "--story-time": {
+     "choices": [],
+     "default": null,
      "takesValue": true
     },
     "--topbar-height": {
@@ -864,9 +914,14 @@
   "check (warnings only)": 0,
   "compare": 0,
   "hitmap": 0,
+  "hitmap (cut to fit)": 0,
   "hitmap --at": 0,
+  "inspect": 0,
+  "inspect --all": 0,
   "layout": 0,
+  "layout (cut to fit)": 0,
   "layout --rich": 0,
+  "layout --rich (cut to fit)": 0,
   "missing file": 2,
   "preview --json": 0,
   "scene --json": 0,
@@ -909,6 +964,12 @@
     ".": [
      "object"
     ],
+    "findingCounts": [
+     "object"
+    ],
+    "findingCounts.*": [
+     "number"
+    ],
     "findings": [
      "array"
     ],
@@ -932,6 +993,9 @@
     ],
     "model": [
      "string"
+    ],
+    "moreFindings": [
+     "number"
     ],
     "schema": [
      "string"
@@ -1042,6 +1106,18 @@
     ".": [
      "object"
     ],
+    "cut": [
+     "array"
+    ],
+    "cut[]": [
+     "object"
+    ],
+    "cut[].more": [
+     "number"
+    ],
+    "cut[].path": [
+     "string"
+    ],
     "hitTests": [
      "array"
     ],
@@ -1074,6 +1150,12 @@
     ],
     "model": [
      "string"
+    ],
+    "moreHitTests": [
+     "number"
+    ],
+    "moreNodes": [
+     "number"
     ],
     "nodes": [
      "array"
@@ -1159,10 +1241,301 @@
    },
    "version": 1
   },
+  "inspect": {
+   "fields": {
+    ".": [
+     "object"
+    ],
+    "assetCounts": [
+     "object"
+    ],
+    "assetCounts.animations": [
+     "number"
+    ],
+    "assetCounts.images": [
+     "number"
+    ],
+    "assetCounts.meshes": [
+     "number"
+    ],
+    "assetCounts.sounds": [
+     "number"
+    ],
+    "assets": [
+     "object"
+    ],
+    "assets.animations": [
+     "array"
+    ],
+    "assets.images": [
+     "array"
+    ],
+    "assets.images[]": [
+     "string"
+    ],
+    "assets.meshes": [
+     "array"
+    ],
+    "assets.sounds": [
+     "array"
+    ],
+    "classCounts": [
+     "object"
+    ],
+    "classCounts.*": [
+     "number"
+    ],
+    "findingCounts": [
+     "object"
+    ],
+    "findingCounts.*": [
+     "number"
+    ],
+    "findings": [
+     "array"
+    ],
+    "findings[]": [
+     "object"
+    ],
+    "findings[].check": [
+     "string"
+    ],
+    "findings[].detail": [
+     "string"
+    ],
+    "findings[].line": [
+     "null",
+     "number"
+    ],
+    "findings[].path": [
+     "string"
+    ],
+    "findings[].severity": [
+     "string"
+    ],
+    "instances": [
+     "number"
+    ],
+    "kind": [
+     "string"
+    ],
+    "moreFindings": [
+     "number"
+    ],
+    "moreRoots": [
+     "number"
+    ],
+    "moreScripts": [
+     "number"
+    ],
+    "roots": [
+     "array"
+    ],
+    "roots[]": [
+     "object"
+    ],
+    "roots[].className": [
+     "string"
+    ],
+    "roots[].path": [
+     "string"
+    ],
+    "schema": [
+     "string"
+    ],
+    "scripts": [
+     "array"
+    ],
+    "scriptsTotal": [
+     "object"
+    ],
+    "scriptsTotal.count": [
+     "number"
+    ],
+    "scriptsTotal.lines": [
+     "number"
+    ],
+    "scripts[]": [
+     "object"
+    ],
+    "scripts[].bytes": [
+     "number"
+    ],
+    "scripts[].className": [
+     "string"
+    ],
+    "scripts[].disabled": [
+     "boolean"
+    ],
+    "scripts[].lines": [
+     "number"
+    ],
+    "scripts[].path": [
+     "string"
+    ],
+    "source": [
+     "string"
+    ]
+   },
+   "version": 1
+  },
+  "inspect --all": {
+   "fields": {
+    ".": [
+     "object"
+    ],
+    "assetCounts": [
+     "object"
+    ],
+    "assetCounts.animations": [
+     "number"
+    ],
+    "assetCounts.images": [
+     "number"
+    ],
+    "assetCounts.meshes": [
+     "number"
+    ],
+    "assetCounts.sounds": [
+     "number"
+    ],
+    "assets": [
+     "object"
+    ],
+    "assets.animations": [
+     "array"
+    ],
+    "assets.images": [
+     "array"
+    ],
+    "assets.images[]": [
+     "string"
+    ],
+    "assets.meshes": [
+     "array"
+    ],
+    "assets.sounds": [
+     "array"
+    ],
+    "classCounts": [
+     "object"
+    ],
+    "classCounts.*": [
+     "number"
+    ],
+    "findingCounts": [
+     "object"
+    ],
+    "findingCounts.*": [
+     "number"
+    ],
+    "findings": [
+     "array"
+    ],
+    "findings[]": [
+     "object"
+    ],
+    "findings[].check": [
+     "string"
+    ],
+    "findings[].detail": [
+     "string"
+    ],
+    "findings[].line": [
+     "null",
+     "number"
+    ],
+    "findings[].path": [
+     "string"
+    ],
+    "findings[].severity": [
+     "string"
+    ],
+    "instances": [
+     "number"
+    ],
+    "kind": [
+     "string"
+    ],
+    "moreFindings": [
+     "number"
+    ],
+    "moreRoots": [
+     "number"
+    ],
+    "moreScripts": [
+     "number"
+    ],
+    "roots": [
+     "array"
+    ],
+    "roots[]": [
+     "object"
+    ],
+    "roots[].className": [
+     "string"
+    ],
+    "roots[].path": [
+     "string"
+    ],
+    "schema": [
+     "string"
+    ],
+    "scripts": [
+     "array"
+    ],
+    "scriptsTotal": [
+     "object"
+    ],
+    "scriptsTotal.count": [
+     "number"
+    ],
+    "scriptsTotal.lines": [
+     "number"
+    ],
+    "scripts[]": [
+     "object"
+    ],
+    "scripts[].bytes": [
+     "number"
+    ],
+    "scripts[].className": [
+     "string"
+    ],
+    "scripts[].disabled": [
+     "boolean"
+    ],
+    "scripts[].lines": [
+     "number"
+    ],
+    "scripts[].path": [
+     "string"
+    ],
+    "source": [
+     "string"
+    ]
+   },
+   "version": 1
+  },
   "layout": {
    "fields": {
     ".": [
      "object"
+    ],
+    "cut": [
+     "array"
+    ],
+    "cut[]": [
+     "object"
+    ],
+    "cut[].more": [
+     "number"
+    ],
+    "cut[].path": [
+     "string"
+    ],
+    "moreRects": [
+     "number"
     ],
     "rects": [
      "object"
@@ -1199,8 +1572,23 @@
     ".": [
      "object"
     ],
+    "cut": [
+     "array"
+    ],
+    "cut[]": [
+     "object"
+    ],
+    "cut[].more": [
+     "number"
+    ],
+    "cut[].path": [
+     "string"
+    ],
     "model": [
      "string"
+    ],
+    "moreNodes": [
+     "number"
     ],
     "nodes": [
      "array"
@@ -1282,6 +1670,12 @@
      "number"
     ],
     "nodes[].rect.y": [
+     "number"
+    ],
+    "nodes[].shortened": [
+     "object"
+    ],
+    "nodes[].shortened.*": [
      "number"
     ],
     "nodes[].strokes": [
@@ -1439,6 +1833,9 @@
     ],
     "missingAssets[].uri": [
      "string"
+    ],
+    "moreMissingAssets": [
+     "number"
     ],
     "notes": [
      "array"

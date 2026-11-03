@@ -23,12 +23,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from _models import ir_udim2 as udim2
+
 ROOT = Path(__file__).resolve().parents[1]
 RHR = [sys.executable, "-m", "rhr"]
-
-
-def udim2(xs, xo, ys, yo):
-    return {"_t": "UDim2", "XS": xs, "XO": xo, "YS": ys, "YO": yo}
 
 
 def color(r, g, b):

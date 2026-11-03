@@ -63,7 +63,7 @@ EXPECTED = {
 
 def main() -> int:
     print("computed reads: on an 800x600 screen, whose area is 800x542 below the top bar")
-    proc = subprocess.run([sys.executable, "-m", "rhr", "layout", str(STORY), "--rich", "--viewport", "800x600"],
+    proc = subprocess.run([sys.executable, "-m", "rhr", "layout", str(STORY), "--rich", "--all", "--viewport", "800x600"],
                           cwd=ROOT, capture_output=True, text=True, timeout=300)
     check(proc.returncode == 0, f"layout exits 0 {proc.stderr[-400:] if proc.returncode else ''}")
     if proc.returncode == 0:

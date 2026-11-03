@@ -105,7 +105,7 @@ def compare(place: Path, tolerance: float, stud_tolerance: float, topbar_height:
     truth = read_truth(place)
     text_sized = _text_sized_paths(place)
     width, height = (int(round(value)) for value in truth["viewport"])
-    rich = rhr_json(["layout", str(place), "--rich", "--viewport", f"{width}x{height}",
+    rich = rhr_json(["layout", str(place), "--rich", "--all", "--viewport", f"{width}x{height}",
                      "--topbar-height", str(topbar_height)]) if truth["gui"] else {"nodes": []}
     layout = {node["path"]: node["rect"] for node in rich["nodes"]}
     laid_out_text = {node["path"]: (node.get("text") or {}).get("bounds") for node in rich["nodes"]}

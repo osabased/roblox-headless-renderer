@@ -78,9 +78,20 @@ nose); with `--focus <path>` the model's own front.
 
 - Every JSON document has a `schema` field (`rhr.check/1`, `rhr.scene-summary/1`, ...).
   A different version means the shape changed.
-- Default outputs stay small (tens of KB even for a 100k-part place). Narrow with
-  `--path`; ask for everything only when needed (`scene-dump --parts`, `hitmap --all`,
-  `inspect --all`).
+- Default outputs stay under 30,000 characters, even for a 100k-part place: a list
+  that grows with the file is cut on stdout. Not cut: hitmap `panes`, ui `screens`,
+  `ui --annotate`, `scene-dump --parts`, `inspect --all` and `rhr batch`. The
+  document counts what was left out (`moreRects`, `moreNodes`, `moreHitTests`,
+  `moreFindings` beside `findingCounts`, `moreScripts`, `moreRoots`,
+  `moreMissingAssets`), `layout`'s and `hitmap`'s `cut` names the paths it was under,
+  a row too long for stdout is kept with its long text cut and `shortened` naming it,
+  and stderr says so. Narrow with `--path`. On `layout`, `check`, `hitmap` and
+  `inspect`, `--out file.json` writes the default document uncut; `--all` prints it
+  uncut too, with what the default leaves out by design. On `ui`, `scene` and
+  `preview`, `--out` is the PNG and only `--all` lists every missing asset. `check`
+  and `inspect` keep at most 10 findings of each check on stdout; `check`'s exit code
+  counts all. Ask for everything only when needed (`scene-dump --parts`, `hitmap --all`
+  for hidden elements too, `inspect --all` for every script and asset id).
 - `ui`, `scene` and `preview` print the PNG's path, or with `--json` a report
   (`rhr.render/1`).
 - Exit codes: 0 done; 1 only from `check` (an error finding); 2 the command failed or
@@ -128,7 +139,9 @@ story time ...`) and the timers still waiting, with the file and line that set t
 `--story-time T` saves it T seconds in instead, mid-tween. Controls take
 their defaults; nothing is clicked. `RHR_STORY_SIZES=0` runs stories without layout,
 every such read zero. A story that fails exits 2 with the error pointed at your files
-and lines.
+and lines. So does one that builds no UI that draws (nothing, only layouts or Folders,
+or only hidden elements): stderr names what it built. A timer still waiting at the
+capture is named with when it is due; a later `--story-time` may show what it builds.
 
 ## How far to trust the output
 

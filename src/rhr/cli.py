@@ -32,6 +32,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from rhr.budget import ALLOWANCE, SUMMARY_LIMIT, count_shortened, cut, cut_findings, cut_tree, finding_counts
+from rhr.hitmap import _under
 from rhr.paths import IR_DIR
 from rhr.schema import dumps, stamp
 
@@ -43,15 +45,27 @@ DEFAULT_VIEWPORT = (1920, 1080)
 MODEL_SUFFIXES = {".rbxm", ".rbxmx", ".rbxl", ".rbxlx"}
 
 
-def _under(path: str, prefix: str) -> bool:
-    """`path` is `prefix` or inside it (paths as RHR prints them)."""
-    prefix = prefix.strip().strip("/")
-    return path == prefix or path.startswith(prefix + "/")
-
-
 def _die(message: str) -> int:
     print(f"rhr: {message}", file=sys.stderr)
     return 2
+
+
+def _no_ui_under(path: str) -> int:
+    return _die(f"no UI under {path}")
+
+
+def _cut_note(command: str, rows: str, shown, more: int,
+              how: str = "--path for one part, --all or --out for every one") -> None:
+    """The stderr line for a list cut to fit stdout (rhr.budget): *shown* is what was
+    kept of it, *more* how many were left out; nothing when none was left out or
+    shortened."""
+    short = count_shortened(shown)
+    if more or short:
+        total = len(shown) + more
+        note = f"{total - more} of {total} {rows} on stdout, cut to fit" if more else f"{total} {rows} on stdout"
+        if short:
+            note += f", {short} with long text shortened to fit (`shortened` names each field)"
+        print(f"{command} {note} ({how})", file=sys.stderr)
 
 
 def parse_viewport(text: str) -> tuple[int, int]:
@@ -63,6 +77,15 @@ def parse_viewport(text: str) -> tuple[int, int]:
     if width <= 0 or height <= 0:
         raise argparse.ArgumentTypeError(f"viewport must be positive, got {text!r}")
     return width, height
+
+
+def parse_instance_path(text: str) -> str:
+    """A `--path` as RHR prints paths: the spaces and slashes at its ends dropped, so
+    `Gui/Shop/` and `/Gui/Shop` name Gui/Shop."""
+    path = re.sub(r"^[\s/]+|[\s/]+$", "", text)
+    if not path:
+        raise argparse.ArgumentTypeError(f"--path is an instance path such as StarterGui/Shop, got {text!r}")
+    return path
 
 
 def parse_point(text: str) -> tuple[float, float]:
@@ -196,6 +219,10 @@ def _finish_picture(args, report: dict) -> int:
     # {name, version, path} of the browser that drew it; null when none was needed.
     report.setdefault("browser", browsers.used)
     if args.json:
+        missing = report.get("missingAssets") or []
+        shown, more = (missing, 0) if getattr(args, "all", False) else cut(missing, ALLOWANCE // 2, SUMMARY_LIMIT)
+        report.update(missingAssets=shown, moreMissingAssets=more)
+        _cut_note(args.command, "missing assets", shown, more, "--all for every one")
         print(dumps(stamp("render", report)))
     else:
         for view in report.get("views") or [report]:
@@ -299,7 +326,7 @@ def _ui(args) -> int:
 
     if rect_map is not None:
         layout = {path: rect_to_dict(rect) for path, rect in rect_map.items()}
-        document = stamp("layout", {"viewport": [width, height], "rects": layout})
+        document = stamp("layout", {"viewport": [width, height], "rects": layout, "moreRects": 0, "cut": []})
         Path(args.dump_layout).parent.mkdir(parents=True, exist_ok=True)
         Path(args.dump_layout).write_text(dumps(document), encoding="utf-8")
         print(f"layout {args.dump_layout}  {len(layout)} rects", file=sys.stderr)
@@ -383,8 +410,7 @@ def _layout(args) -> int:
         if args.path:
             dump = {**dump, "nodes": [n for n in dump["nodes"] if _under(n["path"], args.path)]}
             if not dump["nodes"]:
-                return _die(f"no UI under {args.path}")
-        text = dump_json(dump)
+                return _no_ui_under(args.path)
         elapsed = int((time.perf_counter() - t0) * 1000)
         count = len(dump["nodes"])
         # Same guard as the plain path: an empty dump is a pipeline bug, not an
@@ -392,13 +418,18 @@ def _layout(args) -> int:
         if not count and screens:
             return _die("the structured dump is empty. That is a bug in the pipeline, "
                         "not an empty UI: nodes reached the renderer without a _path.")
+        dump = {**dump, "moreNodes": 0, "cut": []}
         if args.out:
             Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.out).write_text(text, encoding="utf-8")
+            Path(args.out).write_text(dump_json(dump), encoding="utf-8")
             print(args.out, file=sys.stderr)
         else:
-            print(text)
+            if not args.all:
+                rows, cuts = cut_tree([(node["path"], node) for node in dump["nodes"]], ALLOWANCE)
+                dump.update(nodes=[node for _, node in rows], moreNodes=count - len(rows), cut=cuts)
+            print(dump_json(dump))
         print(f"dump {count} nodes  {elapsed}ms", file=sys.stderr)
+        _cut_note("layout", "nodes", dump["nodes"], dump["moreNodes"])
         return 0
 
     # A rect is resolved by the paint pass, run on a null canvas: the same geometry
@@ -415,17 +446,21 @@ def _layout(args) -> int:
     if args.path:
         layout = {path: rect for path, rect in layout.items() if _under(path, args.path)}
         if not layout:
-            return _die(f"no UI under {args.path}")
+            return _no_ui_under(args.path)
     # JSON on stdout, the count on stderr, so `rhr layout model.rbxm | jq` works.
     print(f"layout {len(layout)} rects", file=sys.stderr)
     _stored_gui_note(ir_path)
-    document = stamp("layout", {"viewport": [width, height], "rects": layout})
+    document = stamp("layout", {"viewport": [width, height], "rects": layout, "moreRects": 0, "cut": []})
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(dumps(document), encoding="utf-8")
         print(args.out, file=sys.stderr)
     else:
+        if not args.all:
+            rows, cuts = cut_tree(list(layout.items()), ALLOWANCE)
+            document.update(rects=dict(rows), moreRects=len(layout) - len(rows), cut=cuts)
         print(dumps(document))
+    _cut_note("layout", "rects", document["rects"], document["moreRects"])
     return 0
 
 
@@ -547,6 +582,14 @@ def _check(args) -> int:
         return _die(str(exc))
     elapsed = int((time.perf_counter() - t0) * 1000)
 
+    ui_paths = result.pop("_paths")
+    hidden = [p for p in result.pop("_hidden") if args.path and _under(p, args.path)]
+    # A --path naming nothing, or only hidden UI, would read as a clean UI.
+    if args.path and not any(_under(p, args.path) for p in ui_paths):
+        if hidden:
+            return _die(f"only hidden UI under {args.path} ({len(hidden)}): check skips hidden UI, "
+                        f"and --show {args.path} checks it as shown")
+        return _no_ui_under(args.path)
     if args.path:
         result["findings"] = [f for f in result["findings"] if any(_under(p, args.path) for p in f["paths"])]
     findings = result["findings"]
@@ -554,14 +597,19 @@ def _check(args) -> int:
     errors = sum(1 for f in findings if f["severity"] == "error")
     warnings = sum(1 for f in findings if f["severity"] == "warning")
     infos = len(findings) - errors - warnings
+    result["findingCounts"] = finding_counts(findings)
+    result["moreFindings"] = 0
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(findings_json(result), encoding="utf-8")
         print(args.out, file=sys.stderr)
     else:
+        if not args.all:
+            result.update(cut_findings(findings, ALLOWANCE))
         print(findings_json(result))
     counts = f"{errors} error, {warnings} warning" + (f", {infos} info" if infos else "")
     print(f"check {len(findings)} findings ({counts})  {elapsed}ms", file=sys.stderr)
+    _cut_note("check", "findings", result["findings"], result["moreFindings"])
     reasons = {"severity": f"below --min-severity {args.min_severity}", "ignored": "--ignore",
                "attribute": "RhrIgnore attributes", "baseline": "already in the baseline"}
     for key, count in left_out.items():
@@ -585,6 +633,8 @@ def _check_devices(args, source, baseline) -> dict:
         raise ValueError(f"unknown device {', '.join(unknown)}; the devices are: all, {', '.join(devices.DEVICES)}")
     merged: dict[tuple, dict] = {}
     left_out: dict[str, int] = {}
+    paths: set[str] = set()
+    hidden: set[str] = set()
     model = None
     try:
         for name in names:
@@ -595,6 +645,8 @@ def _check_devices(args, source, baseline) -> dict:
             result = check_model(ir_path, width, height, topbar_height=args.topbar_height,
                                  min_severity=args.min_severity, ignore=tuple(args.ignore), baseline=baseline)
             model = result["model"]
+            paths.update(result["_paths"])
+            hidden.update(result["_hidden"])
             for key, count in result["_left_out"].items():
                 left_out[key] = left_out.get(key, 0) + count
             for finding in result["findings"]:
@@ -607,6 +659,8 @@ def _check_devices(args, source, baseline) -> dict:
 
     document = stamp("check", {"model": model, "findings": _sort(list(merged.values()))})
     document["_left_out"] = left_out
+    document["_paths"] = paths
+    document["_hidden"] = sorted(hidden)
     return document
 
 
@@ -681,10 +735,20 @@ def _hitmap(args) -> int:
     if args.at:
         hitmap = at_point(hitmap, *args.at)
     else:
-        if args.path and not any(n["path"] == args.path or n["path"].startswith(args.path + "/")
-                                 for n in hitmap["nodes"]):
+        under = [n for n in hitmap["nodes"] if not args.path or _under(n["path"], args.path)]
+        if args.path and not under:
             return _die(f"no interactive element under {args.path}")
-        hitmap = narrowed(hitmap, path=args.path, everything=args.all)
+        hidden = sum(1 for n in under if not n["visible"])
+        # Without --path, a UI where nothing takes a click is an answer (panes lists its
+        # screens), as a clean UI is for check; under a --path that names only hidden
+        # elements, an empty list would read as the path holding nothing interactive.
+        if args.path and not args.all and hidden == len(under):
+            return _die(f"only hidden interactive elements under {args.path} ({hidden}): they take no "
+                        "clicks, and --all lists them")
+        if not args.all and hidden and hidden == len(under):
+            print(f"note   only hidden interactive elements ({hidden}): they take no clicks, and --all lists them",
+                  file=sys.stderr)
+        hitmap = narrowed(hitmap, path=args.path, everything=args.all, whole=args.all or bool(args.out))
     text = dump_json(hitmap)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
@@ -692,13 +756,21 @@ def _hitmap(args) -> int:
         print(args.out, file=sys.stderr)
     else:
         print(text)
-    elapsed = int((time.perf_counter() - t0) * 1000)
+    _hitmap_counts(hitmap, int((time.perf_counter() - t0) * 1000))
+    return 0
+
+
+def _hitmap_counts(hitmap: dict, elapsed: int) -> None:
+    """`rhr hitmap`'s stderr lines: how many nodes and probes there are (those stdout
+    leaves out too, as layout and check count), and a note for each of the two lists
+    stdout cut: the probes can be cut while every node fits."""
     print(
-        f"hitmap {len(hitmap['nodes'])} interactive nodes, "
-        f"{len(hitmap['hitTests'])} probe points  {elapsed}ms",
+        f"hitmap {len(hitmap['nodes']) + hitmap['moreNodes']} interactive nodes, "
+        f"{len(hitmap['hitTests']) + hitmap['moreHitTests']} probe points  {elapsed}ms",
         file=sys.stderr,
     )
-    return 0
+    _cut_note("hitmap", "interactive nodes", hitmap["nodes"], hitmap["moreNodes"])
+    _cut_note("hitmap", "probe points", hitmap["hitTests"], hitmap["moreHitTests"])
 
 
 def _scene(args) -> int:
@@ -810,9 +882,11 @@ def _inspect(args) -> int:
         report = inspect(rojo.build(project, IR_DIR) if project is not None else source)
     except (ValueError, RuntimeError, OSError) as exc:
         return _die(str(exc))
-    scripts = report["scripts"]
-    if not args.all:
-        report = _inspect_summary(report)
+    scripts, findings = report["scripts"], report["findings"]
+    if args.all:
+        report.update(_inspect_counts(report))
+    else:
+        report = _inspect_summary(report, whole=bool(args.out))
     text = dumps(report)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
@@ -820,33 +894,66 @@ def _inspect(args) -> int:
         print(args.out, file=sys.stderr)
     else:
         print(text)
-    report["scripts"] = scripts
     counts = {}
-    for finding in report["findings"]:
+    for finding in findings:
         counts[finding["severity"]] = counts.get(finding["severity"], 0) + 1
-    print(f"inspect {report['instances']} instances, {len(report['scripts'])} scripts, findings: "
+    print(f"inspect {report['instances']} instances, {len(scripts)} scripts, findings: "
           + (", ".join(f"{n} {s}" for s, n in counts.items()) or "none")
           + f"  {int((time.perf_counter() - t0) * 1000)}ms", file=sys.stderr)
+    if not args.all:
+        _cut_note("inspect", "findings", report["findings"], report["moreFindings"],
+                  "--all for every finding, script and asset id; --out for every finding")
+        _cut_note("inspect", "scripts with findings", report["scripts"], report["moreScripts"],
+                  "--all for every script; --out for every one with findings")
+        _cut_note("inspect", "roots", report["roots"], report["moreRoots"], "--all or --out for every one")
     return 0
 
 
 INSPECT_LIMIT = 25
 
 
-def _inspect_summary(report: dict) -> dict:
+def _inspect_counts(report: dict) -> dict:
+    """The count fields every `rhr inspect` document carries, cut or not: the totals of
+    scripts, asset ids and findings, and the `more*` counts (0 until a cut sets them)."""
+    scripts = report["scripts"]
+    return {
+        "scriptsTotal": {"count": len(scripts), "lines": sum(s.get("lines", 0) for s in scripts)},
+        "assetCounts": {kind: len(ids) for kind, ids in report["assets"].items()},
+        "findingCounts": finding_counts(report["findings"]),
+        "moreFindings": 0,
+        "moreScripts": 0,
+        "moreRoots": 0,
+    }
+
+
+def _inspect_summary(report: dict, *, whole: bool) -> dict:
     """`rhr inspect` without --all: the scripts that have findings (the rest counted),
     and each asset list's first INSPECT_LIMIT ids (with counts). A real game listed
-    2,422 scripts and 3,666 asset ids: 424 KB."""
+    2,422 scripts and 3,666 asset ids: 424 KB. Unless *whole* (`--out`), the findings
+    and those scripts are cut to fit stdout as `check`'s findings are (rhr.budget): at
+    most PER_CHECK findings of each check, the most severe first, then the scripts
+    those findings are in first; and the roots to the first SUMMARY_LIMIT (a file of
+    3,000 top-level Folders printed 128 KB of them). `findingCounts` counts every
+    finding by check, and `moreFindings`, `moreScripts` and `moreRoots` what was left
+    out. `classCounts` is left whole: Roblox's class list bounds it."""
     flagged = {finding["path"] for finding in report["findings"]}
     scripts = report["scripts"]
     assets = report["assets"]
-    return {
+    summary = {
         **report,
         "scripts": [script for script in scripts if script["path"] in flagged],
-        "scriptsTotal": {"count": len(scripts), "lines": sum(s.get("lines", 0) for s in scripts)},
         "assets": {kind: ids[:INSPECT_LIMIT] for kind, ids in assets.items()},
-        "assetCounts": {kind: len(ids) for kind, ids in assets.items()},
+        **_inspect_counts(report),
     }
+    if not whole:
+        roots = report["roots"]
+        summary.update(roots=roots[:SUMMARY_LIMIT], moreRoots=max(0, len(roots) - SUMMARY_LIMIT))
+        summary.update(cut_findings(report["findings"], ALLOWANCE // 2))
+        shown = {finding["path"] for finding in summary["findings"]}
+        order = {script["path"]: i for i, script in enumerate(summary["scripts"])}
+        kept, more = cut(sorted(summary["scripts"], key=lambda script: script["path"] not in shown), ALLOWANCE // 2)
+        summary.update(scripts=sorted(kept, key=lambda script: order[script["path"]]), moreScripts=more)
+    return summary
 
 
 def _icons(args) -> int:
@@ -1022,8 +1129,18 @@ def _scene_dump(args) -> int:
         )
     except (ValueError, RuntimeError, OSError) as exc:
         return _die(str(exc))
-    if args.path and not any(p["path"] == args.path or p["path"].startswith(args.path + "/")
-                             for p in scene_dump["parts"]):
+    # `lighting` is left out, and a Terrain counts only when its SmoothGrid was read and
+    # is not the empty grid (`empty` False, rhr.scene_dump): neither is something built.
+    # A sky alone counts: its faces are what gets checked.
+    if (not scene_dump["parts"] and not any(t.get("empty") is False for t in scene_dump["terrain"])
+            and scene_dump["sky"] is None and scene_dump["atmosphere"] is None
+            and not any(scene_dump[kind] for kind in ("lights", "beams", "trails"))):
+        if any(t.get("empty") is None for t in scene_dump["terrain"]):
+            return _die("no 3D world to show: the file holds only Terrain, and its voxels (SmoothGrid) "
+                        f"could not be read: {scene_dump.get('_terrainUnread')}")
+        return _die("no 3D world: the file has no parts, terrain, sky, atmosphere, lights or effects, "
+                    "in the world or in storage (rhr inspect lists what it holds; a UI file: rhr layout or rhr ui)")
+    if args.path and not any(_under(p["path"], args.path) for p in scene_dump["parts"]):
         return _die(f"no parts under {args.path} (the summary's models[].path lists where parts are)")
     parts = args.parts or args.part_class or args.limit is not None
     if not parts:
@@ -1082,6 +1199,9 @@ def _picture_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true",
                         help="print a JSON report (rhr.render/1: the PNG's path and size, the camera, "
                              "what was approximated or missing, notes) instead of the path")
+    parser.add_argument("--all", action="store_true",
+                        help="with --json, list every missing asset (the report lists those that fit, at most 40; "
+                             "moreMissingAssets counts the rest)")
 
 
 def _test_hooks(parser: argparse.ArgumentParser) -> None:
@@ -1272,7 +1392,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="top bar inset in px for a CoreUISafeInsets ScreenGui (default: 58)",
     )
     _story_time_argument(p_layout)
-    p_layout.add_argument("--path", metavar="PATH", help="only the elements under PATH")
+    p_layout.add_argument("--path", type=parse_instance_path, metavar="PATH", help="only the elements under PATH")
+    p_layout.add_argument("--all", action="store_true",
+                          help="print every rect (stdout is cut to fit, breadth-first: moreRects counts "
+                               "the rest, cut names where; --out writes them all)")
     p_layout.add_argument("--all-guis", action="store_true",
                           help="in a place, also draw ScreenGuis stored outside StarterGui (templates scripts clone in)")
     p_layout.add_argument("--show", action="append", default=[], metavar="PATH",
@@ -1305,8 +1428,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_check.add_argument("--ignore", action="append", default=[], metavar="CHECK",
                          help="leave out one check by id (repeatable)")
     p_check.add_argument("--baseline", metavar="JSON",
-                         help="an earlier `rhr check` output: report only findings not in it")
-    p_check.add_argument("--path", metavar="PATH", help="only the findings about elements under PATH")
+                         help="an earlier `rhr check <target> --out JSON` (stdout cut to fit is refused): "
+                              "report only findings not in it")
+    p_check.add_argument("--path", type=parse_instance_path, metavar="PATH",
+                         help="only the findings about elements under PATH")
+    p_check.add_argument("--all", action="store_true",
+                         help="print every finding (stdout is cut to fit: at most 10 of each check, "
+                              "most severe first; findingCounts counts them all, --out writes them all)")
     p_check.add_argument("--devices", metavar="all|NAMES",
                          help="check on several --device screens (all, or e.g. phone,tablet); each finding "
                               "lists the devices it was seen on")
@@ -1365,9 +1493,12 @@ def build_parser() -> argparse.ArgumentParser:
     _story_time_argument(p_hitmap)
     p_hitmap.add_argument("--at", type=parse_point, metavar="X,Y",
                           help="who gets a click at this pixel, and everything interactive under it")
-    p_hitmap.add_argument("--path", metavar="PATH", help="only the interactive elements under PATH")
+    p_hitmap.add_argument("--path", type=parse_instance_path, metavar="PATH",
+                          help="only the interactive elements under PATH")
     p_hitmap.add_argument("--all", action="store_true",
-                          help="also list hidden interactive elements (they take no clicks)")
+                          help="also list hidden interactive elements (they take no clicks), and print "
+                               "every one (stdout is cut to fit, breadth-first: moreNodes counts the rest; "
+                               "--out writes every visible one)")
     p_hitmap.add_argument("--all-guis", action="store_true",
                           help="in a place, also draw ScreenGuis stored outside StarterGui (templates scripts clone in)")
     p_hitmap.add_argument("--show", action="append", default=[], metavar="PATH",
@@ -1400,7 +1531,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_inspect.add_argument("--out", help="write JSON here instead of stdout")
     p_inspect.add_argument("--all", action="store_true",
                            help="every script and every asset id (by default: the scripts with findings, "
-                                "the first 25 ids of each kind, and counts)")
+                                "the first 25 ids of each kind, and counts; on stdout at most 10 findings of "
+                                "each check, the scripts that fit and the first 40 roots, which --out writes "
+                                "in full)")
     p_inspect.set_defaults(func=_inspect)
 
     p_icons = sub.add_parser("icons", help="square icon PNGs of models on a transparent background, "
@@ -1441,7 +1574,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_scene_dump.add_argument("file", help="Roblox model/place, Rojo project, IR .json, or a Roblox asset id or link")
     p_scene_dump.add_argument("--parts", action="store_true",
                               help="every part (rhr.scene-dump/1); the default is a summary (rhr.scene-summary/1)")
-    p_scene_dump.add_argument("--path", metavar="PATH",
+    p_scene_dump.add_argument("--path", type=parse_instance_path, metavar="PATH",
                               help="only what is under PATH: its summary, or with --parts its parts")
     p_scene_dump.add_argument("--class", dest="part_class", action="append", default=[], metavar="CLASS",
                               help="only parts of this class, e.g. MeshPart (repeatable; implies --parts)")
@@ -1562,15 +1695,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except NothingToDraw as exc:
-        return _die(f"{exc}{_input_hint(Path(args.file))}")
+        return _die(f"{exc}{_input_hint(Path(args.file), exc)}")
 
 
-def _input_hint(source: Path) -> str:
-    """What about the input explains an empty result (added to NothingToDraw's reasons)."""
+def _input_hint(source: Path, exc: Exception | None = None) -> str:
+    """What about the input explains an empty result (added to NothingToDraw's reasons).
+    A story is told to parent its UI to its target only when it parented nothing and no
+    timer was still waiting: otherwise BuiltNothing's message already says what it built
+    or that a later --story-time may show it."""
     from rhr import rojo, story
 
     if story.is_story(source):
-        return "\nthe story built no UI: it must parent what it makes to its target (or return it)"
+        if isinstance(exc, story.BuiltNothing) and (exc.holds or exc.timers):
+            return ""
+        return "\nthe story built no UI: it must parent what it makes to its target"
     project = rojo.project_file(source)
     if project is None:
         return ""

@@ -5508,8 +5508,11 @@ async function main() {
   if (!response.ok) throw new Error(`IR request failed: ${response.status}`);
   const ir = await response.json();
   mark('IR fetched');
+  // rhr-ir.luau writes `"roots": {}` for a file with nothing in its world slice (as
+  // Lune's serde encodes an empty table); children are read the same way.
+  const irRoots = Object.values(ir.roots || {});
   // A ViewportFrame draws its own contents, wherever its GUI is kept.
-  const roots = viewportMode ? (ir.roots || []) : worldRoots(ir.roots || [], params.get('focus'));
+  const roots = viewportMode ? irRoots : worldRoots(irRoots, params.get('focus'));
   const index = buildNodeIndex(roots);
   sceneIndex = index;
   use2022Materials = computeUse2022Materials(index);

@@ -59,7 +59,7 @@ the interface as it is.
 | `doctor` | keep; names the browser RHR would use | |
 | `cache` | keep | |
 | `browser start/status/stop` | keep as advanced | The warm worker starts by itself; this is for scripts that want control. |
-| new: `inspect` (2026-09-27) | JSON `rhr.inspect/1`: kind, instances, classCounts, roots, scripts (path, className, lines, bytes, disabled), assets (images, meshes, sounds, animations: ids), findings (check, severity, path, line, detail) | A data command: `--out`; exit 0 whatever it finds (findings are reasons to look, not verdicts). |
+| new: `inspect` (2026-09-27) | JSON `rhr.inspect/1`: kind, instances, classCounts, roots, scripts (path, className, lines, bytes, disabled), assets (images, meshes, sounds, animations: ids), findings (check, severity, path, line, detail), findingCounts, scriptsTotal (count, lines), assetCounts, moreFindings, moreScripts, moreRoots (all three 0 with `--all`, which carries scriptsTotal and assetCounts too) | A data command: `--out`; exit 0 whatever it finds (findings are reasons to look, not verdicts). |
 | new: `icons` (2026-09-27) | square transparent PNGs of models, one per file, folder entry or asset id; paths on stdout | Flags: `--out-dir`, `--size`, `--view`, `--margin`, `--fov`, `--background`, `--no-shadows`, `--no-effects`, `--offline`. Exit 2 if any failed. |
 | new: `view` (2026-09-27) | the 3D world in a local page to move around in; prints the page's address on stdout, serves until stopped, redraws when the source changes | For people: "have a look" without Studio. Flags: `--focus`, `--view`, `--no-shadows`, `--flat-materials`, `--no-effects`, `--no-open`, `--port`, `--offline`. |
 | new input: stories (2026-09-28) | `ui`, `layout`, `check`, `hitmap` take a `*.story.luau` in a Rojo project; documents name it `<Name>.story.json` | Experimental in 1.0 (decided 2026-09-28): its limits may narrow, its outputs are the same documents as for a file. |
@@ -98,14 +98,14 @@ attribute leave findings out; stderr says how many and why.
 
 | Schema | Today | Proposal |
 |---|---|---|
-| `rhr.layout/1` | `{viewport, rects: {path: {x,y,w,h}}}` | keep |
-| `rhr.layout-rich/1` | `{model, viewport, nodes: [{path, class, rect, zIndex, paintOrder, visible, clipsDescendants, background, gradient, strokes, ...}]}` | keep |
-| `rhr.check/1` | `{model, findings: [{check, severity, path(s), detail}]}` | keep; list every `check` id in docs/AGENTS.md as contract (new checks may be added) |
-| `rhr.hitmap/1` | `{model, viewport, panes, nodes, hitTests}` | keep |
+| `rhr.layout/1` | `{viewport, rects: {path: {x,y,w,h}}, moreRects, cut}` | keep |
+| `rhr.layout-rich/1` | `{model, viewport, nodes: [{path, class, rect, zIndex, paintOrder, visible, clipsDescendants, background, gradient, strokes, ..., shortened}], moreNodes, cut}` | keep |
+| `rhr.check/1` | `{model, findings: [{check, severity, path(s), detail}], findingCounts, moreFindings}` | keep; list every `check` id in docs/AGENTS.md as contract (new checks may be added) |
+| `rhr.hitmap/1` | `{model, viewport, panes, nodes, hitTests, moreNodes, moreHitTests, cut}` | keep |
 | `rhr.scene-dump/1` | `{source, bounds, parts, cameras, lights, beams, trails, terrain, lighting, sky, atmosphere, fallbacks, unsupportedVisualClasses, experimental, ...}` | keep, `experimental` included: it flags what is drawn with less checking (Atmosphere, post effects, local lights, decals; materials without Studio). The first draft of this review wrongly called it always empty. |
 | `rhr.compare/1` | snake_case keys | `rhr.compare/2`, camelCase |
 | `rhr.browser/1` | `{running}` | keep; add the browser used |
-| new: `rhr.render/1` | none | the `--json` report of `ui`, `scene`, `preview` (rule 2): `{command, source, out, size, notes}`, plus `screens` (`ui`, `preview`) and `camera {position, lookDirection, fieldOfView}`, `fallbacks`, `materialFallbacks`, `unsupportedVisualClasses`, `experimental`, `missingAssets` (`ui`, `scene`, `preview`; a UI image's row adds `reason`, `rect`, and `hint` where RHR can say; `view` with `scene --views`) |
+| new: `rhr.render/1` | none | the `--json` report of `ui`, `scene`, `preview` (rule 2): `{command, source, out, size, notes}`, plus `screens` (`ui`, `preview`) and `camera {position, lookDirection, fieldOfView}`, `fallbacks`, `materialFallbacks`, `unsupportedVisualClasses`, `experimental`, `missingAssets` and `moreMissingAssets` (`ui`, `scene`, `preview`; a UI image's row adds `reason`, `rect`, and `hint` where RHR can say; `view` with `scene --views`) |
 | new: `rhr.render/1` `views` (Phase 3) | none | `scene --views`: `views: [{view, out, camera}]`; `out` and `camera` stay the first view's |
 | new: `rhr.batch/1` (Phase 3) | none | `rhr batch`: `{results: [{command, exitCode, stdout, stderr}]}`; `stdout` the parsed document when it is JSON, else the text |
 | `rhr.ir/1` | internal format | not contract |
@@ -144,13 +144,89 @@ or flag is allowed and printed. After an intentional change:
 - **Default screen 1920x1080**; `--device desktop|laptop|phone|android|tablet|console`
   on `ui`, `layout`, `check`, `hitmap`, `preview` (rhr.devices, measured in Studio's
   emulator); `check --devices all|NAMES` adds `devices` to each finding.
-- **Bounded defaults** (the budget: 50 KB on a 116k-part place, tests/test_output_budget.py):
+- **Bounded defaults** (the budget: 30,000 characters, below):
   `scene-dump` prints `rhr.scene-summary/1` (`--parts` for `rhr.scene-dump/1`, with
   `--path`, `--class`, `--limit` and `partsTotal`); `hitmap` lists visible elements
   (`--all`), stacks cut to four (`stackMore`), `--path`, `--at X,Y`; `inspect` lists
-  flagged scripts and 25 ids per asset kind (`scriptsTotal`, `assetCounts`, `--all`);
-  `--path` on `layout` and `check`.
+  flagged scripts and 25 ids per asset kind (`scriptsTotal`, `assetCounts`, also with `--all`;
+  since 2026-11-02 also cut to fit, below);
+  `--path` on `layout`, `check`, `hitmap` and `scene-dump`, with the spaces and slashes
+  at its ends dropped (`Gui/Shop/` and `/Gui/Shop` name `Gui/Shop`; an empty one is
+  refused).
 - **Pictures**: `ui --crop PATH`, `--fit`, `--annotate` (report: `crop`, `scale`,
   `annotations[]` of `{n, path, class, rect}`), `--max-size PX` on `ui`, `scene`,
   `preview` (report: `scale`, `size` of the written PNG).
 - **`rhr skill [--install DIR]`**: the agent skill.
+
+## Before the freeze (2026-11-02): an output budget, and nothing to show
+
+1.0 criteria 1 and 4 (docs/road-to-1.0.md).
+
+- **The budget is 30,000 characters of JSON on stdout** (rhr.budget), where Claude Code
+  cuts a tool's output, counted as Claude Code counts it: UTF-16 units, so an emoji is
+  two. Every default output on a 100k-part place stays under it
+  (tests/test_output_budget.py).
+- **A list that grows with the file is cut on stdout only.** `--all` prints the whole
+  document. On `layout`, `check`, `hitmap` and `inspect`, `--out` writes the default
+  document uncut: every rect, node and finding on `layout` and `check`, every visible
+  element on `hitmap`, and on `inspect` every finding, the flagged scripts, 25 ids per
+  asset kind and every root. `--all` also adds what the default leaves out by design: hidden elements
+  on `hitmap`, every script and asset id on `inspect`. On `ui`, `scene` and `preview`,
+  `--out` is the PNG, and only `--all` lists every missing asset (`ui --dump-layout`
+  writes every rect). stderr says what was left out and how to get it. Each cut
+  document counts the rows it left out, exactly:
+  - `layout`: rects nearest the top of the tree first, so a kept rect's parent is kept;
+    `moreRects`, and `cut: [{path, more}]` for `--path`: each rect left out is counted
+    under the deepest of its own path and its ancestor paths that the kept rects reach
+    (a kept rect's path, or an ancestor of one), or under its first path segment where
+    they reach none; the 20 paths with the most, most first. `layout --rich`:
+    `moreNodes` and `cut`, where that path is the nearest kept ancestor.
+  - `check`: at most 10 findings of each check, the most severe first, so one kind
+    cannot crowd out the rest; `moreFindings`, and `findingCounts` by check id over
+    every finding. The exit code counts every finding. `--baseline` refuses stdout that
+    was cut: write the baseline with `rhr check <target> --out before.json`.
+  - `hitmap`: nodes nearest the top first, and the hit tests at their centres;
+    `moreNodes`, `moreHitTests` (every probe left out, of the kept nodes or not), and
+    `cut` as on `layout`, where only the interactive elements are rows, so a path in it
+    is the container the kept ones share (1,000 cards of 2 buttons: `.../Scroll`). stderr
+    counts every node and probe point (`hitmap N interactive nodes, M probe points`)
+    and says of each list that was cut how much stdout kept. `--all` also lists hidden
+    elements, as before.
+  - `inspect`: at most 10 findings of each check, as on `check` (`findingCounts`,
+    `moreFindings`), the flagged scripts that fit, those with a finding shown first
+    (`moreScripts`), and the first 40 roots (`moreRoots`). `classCounts` is not cut.
+  - `ui`, `scene`, `preview --json`: the first 40 `missingAssets`;
+    `moreMissingAssets`.
+  - A row too long for the whole budget on its own (a label of 30,000 characters) is
+    kept, not dropped: each string in it over 200 characters, but its `path`, `paths`,
+    `stack` and `target` (the instance paths `--path` takes back), is cut to 200, and
+    `shortened` maps each such field to its full length (`{"text.content": 30000}`). A
+    row that does not fit what is left is skipped, and the rows after it still get
+    their turn; on a tree, the rows under it are skipped with it, unless another row at
+    its path was kept (two siblings of one name), when they still get their turn.
+- **Not cut:** hitmap `panes` and ui `screens` (one per ScreenGui), `ui --annotate`
+  entries, `scene-dump --parts` (asked for by name), any command with `--all`, and
+  `rhr batch` (the sum of its commands).
+- **`--all` no longer stands for `--all-guis`** on `ui`, `preview`, `layout` and
+  `check`: argparse took the prefix for the only flag it matched, and `--all` is now a
+  flag of its own there.
+- **Nothing to show exits 2** (rule 3), with the reason on stderr: `layout`, `check` or
+  `hitmap` with a `--path` that names no element; `check --path` over only hidden UI
+  (`only hidden UI under {path} ({n}): check skips hidden UI, and --show {path} checks
+  it as shown`); `hitmap --path` over only hidden elements (they take no clicks; `--all`
+  lists them); `scene-dump` of a file with no parts, terrain, sky, atmosphere, lights or
+  effects, in the world or in storage, where terrain counts only when its voxels
+  (SmoothGrid) were read and are not empty (a Terrain the file holds no SmoothGrid for
+  is empty), and a file whose only Terrain could not be read says so and why
+  (`no 3D world to show: the file holds only Terrain, and its voxels (SmoothGrid) could
+  not be read: ...`); and a story that builds no UI that draws, on every command: one
+  that builds nothing, only layouts or Folders (`the story built only Folder,
+  UIListLayout, which draw nothing alone`), or only hidden elements (`every GuiObject
+  the story built is hidden (Visible = false): ...`, at most 5). A story captured while
+  a timer was still waiting says so, with when the next is due, and names
+  `--story-time`. tests/test_nothing_to_show.py runs
+  every command on each kind of input (UI only, 3D only, an empty Model, scripts only,
+  Rojo projects with only code or a missing `$path`, cached and uncached asset ids):
+  each one shows something or exits 2 with a reason. `hitmap` without `--path` on a UI
+  where nothing takes a click exits 0: its `panes` say what is there, and an empty
+  `nodes` is the answer, as a clean `check` is.

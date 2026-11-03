@@ -2,7 +2,9 @@
 """CLI checks: the three subcommands a human (or an agent) actually types.
 
 These run the real `rhr` CLI (`python -m rhr`), not the functions behind it: an argument parser that
-silently drops a flag, or a shim that does not find the venv, has to fail here.
+silently drops a flag, or a shim that does not find the venv, has to fail here. A story
+that builds no UI is told to parent what it makes to its target only when it parented
+nothing and no timer was still waiting.
 
 Run: python tests/test_cli.py
 """
@@ -125,8 +127,42 @@ def main() -> int:
     check(proc.returncode != 0 and "usage" in (proc.stdout + proc.stderr).lower(),
           "no subcommand: usage and a non-zero exit")
 
+    story_hint()
     print("cli: ok" if not failures else f"cli: {len(failures)} failed")
     return 1 if failures else 0
+
+
+PARENTING_HINT = "it must parent what it makes to its target"
+
+
+def story_hint() -> None:
+    """A story that builds no UI gets the hint to parent what it makes to its target
+    only when it parented nothing and no timer was still waiting: one that built
+    something that draws nothing, or one whose UI a timer was yet to build, is told
+    that instead (rhr.story.BuiltNothing's message)."""
+    import tempfile
+
+    stories = {
+        "Nothing": "return function(target)\n\treturn function() end\nend\n",
+        "Layout": ('return function(target)\n\tInstance.new("UIListLayout").Parent = target\n'
+                   '\treturn function() end\nend\n'),
+        "Delayed": ('return function(target)\n\ttask.delay(2, function()\n'
+                    '\t\tInstance.new("Frame").Parent = target\n\tend)\n\treturn function() end\nend\n'),
+    }
+    print("cli: a story that builds no UI")
+    with tempfile.TemporaryDirectory(prefix="rhr-story-hint-") as directory:
+        project = Path(directory)
+        (project / "src").mkdir()
+        for name, source in stories.items():
+            (project / "src" / f"{name}.story.luau").write_text(source, encoding="utf-8")
+        (project / "default.project.json").write_text(json.dumps({"name": "story_hint", "tree": {
+            "$className": "DataModel", "ReplicatedStorage": {"UI": {"$path": "src"}}}}), encoding="utf-8")
+        for name, extra, hinted in (("Nothing", (), True), ("Layout", (), False),
+                                    ("Delayed", ("--story-time", "1"), False)):
+            proc = run("layout", str(project / "src" / f"{name}.story.luau"), "--viewport", "800x600", *extra)
+            check(proc.returncode == 2 and (PARENTING_HINT in proc.stderr) == hinted,
+                  f"{name}: exit 2, {'with' if hinted else 'without'} the parenting hint "
+                  f"(exit {proc.returncode}: {proc.stderr.strip()[-240:]})")
 
 
 def test_main():

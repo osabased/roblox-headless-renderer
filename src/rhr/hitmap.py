@@ -60,6 +60,7 @@ can be a target at all.
 
 from __future__ import annotations
 
+from rhr.budget import ALLOWANCE, cut, cut_tree
 from rhr.schema import stamp
 
 import json
@@ -187,6 +188,11 @@ def _round(value) -> float:
     return round(float(value), 3)
 
 
+def _centre(rect: dict) -> tuple[float, float]:
+    """Where a node's probe is: the centre of its rect."""
+    return _round(rect["x"] + rect["w"] / 2), _round(rect["y"] + rect["h"] / 2)
+
+
 def _rect_dict(rect) -> dict:
     return {"x": _round(rect.x), "y": _round(rect.y), "w": _round(rect.w), "h": _round(rect.h)}
 
@@ -308,8 +314,7 @@ def build_hitmap(ir_path, width: int, height: int, topbar_height: float | None =
             rect = record.get("rect")
             if rect is None:
                 continue
-            x = _round(rect["x"] + rect["w"] / 2)
-            y = _round(rect["y"] + rect["h"] / 2)
+            x, y = _centre(rect)
             probe_candidates.append((x, y, pane_nodes, pane_index))
 
     # Cross-pane probing: a higher pane is later in screens and therefore wins.
@@ -358,27 +363,47 @@ STACK_LIMIT = 4
 
 
 def _under(path: str, prefix: str) -> bool:
+    """`path` is `prefix` or inside it, both as RHR prints paths (`--path` is read that
+    way: rhr.cli.parse_instance_path). rhr.cli and rhr.scene_dump use this one too."""
     return path == prefix or path.startswith(prefix + "/")
 
 
-def narrowed(hitmap: dict, *, path: str | None = None, everything: bool = False) -> dict:
+def narrowed(hitmap: dict, *, path: str | None = None, everything: bool = False, whole: bool = False) -> dict:
     """What `rhr hitmap` prints: visible nodes only (a hidden one takes no click;
     `--all` lists them), only those under `path`, the probes at their centres, each
     stack cut to its top STACK_LIMIT (`stackMore` counts the rest). A whole game's UI
-    was 298 KB with every stack in full."""
+    was 298 KB with every stack in full. Unless *whole* (`--all`, `--out`), the nodes
+    are cut to fit stdout breadth-first and the probes with them (rhr.budget):
+    `moreNodes` counts the nodes left out, `moreHitTests` every probe left out (those
+    at a left-out node's centre too), and `cut` names the paths the left-out nodes
+    are under."""
+    def point(test: dict) -> tuple[float, float]:
+        return test["point"]["x"], test["point"]["y"]
+
+    def centres(nodes: list[dict]) -> set[tuple[float, float]]:
+        return {_centre(n["rect"]) for n in nodes if n.get("rect")}
+
     nodes = [n for n in hitmap["nodes"] if (everything or n["visible"]) and (path is None or _under(n["path"], path))]
-    centres = {(round(n["rect"]["x"] + n["rect"]["w"] / 2, 3), round(n["rect"]["y"] + n["rect"]["h"] / 2, 3))
-               for n in nodes if n.get("rect")}
+    at_nodes = centres(nodes)
+    candidates = [test for test in hitmap["hitTests"] if point(test) in at_nodes]
+    kept, more_nodes, cuts = candidates, 0, []
+    if not whole:
+        rows, cuts = cut_tree([(n["path"], n) for n in nodes], ALLOWANCE // 2)
+        more_nodes = len(nodes) - len(rows)
+        nodes = [n for _, n in rows]
+        at_kept = centres(nodes)
+        kept = [test for test in candidates if point(test) in at_kept]
     tests = []
-    for test in hitmap["hitTests"]:
-        if (test["point"]["x"], test["point"]["y"]) not in centres:
-            continue
+    for test in kept:
         test = dict(test)
         if len(test["stack"]) > STACK_LIMIT:
             test["stackMore"] = len(test["stack"]) - STACK_LIMIT
             test["stack"] = test["stack"][:STACK_LIMIT]
         tests.append(test)
-    return {**hitmap, "nodes": nodes, "hitTests": tests}
+    if not whole:
+        tests, _ = cut(tests, ALLOWANCE // 2)
+    return {**hitmap, "nodes": nodes, "hitTests": tests, "moreNodes": more_nodes,
+            "moreHitTests": len(candidates) - len(tests), "cut": cuts}
 
 
 def at_point(hitmap: dict, x: float, y: float) -> dict:
@@ -396,7 +421,7 @@ def at_point(hitmap: dict, x: float, y: float) -> dict:
         "targetIsButton": _is_button(target) if target else None,
         "targetVisible": target["visible"] if target else None,
     }
-    return {**hitmap, "nodes": under, "hitTests": [test]}
+    return {**hitmap, "nodes": under, "hitTests": [test], "moreNodes": 0, "moreHitTests": 0, "cut": []}
 
 
 def dump_json(hitmap: dict) -> str:

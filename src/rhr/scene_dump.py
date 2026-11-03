@@ -12,6 +12,8 @@ from pathlib import Path
 
 from rhr.paths import ICON_CACHE, MESH_CACHE, UNION_CACHE
 
+from rhr.budget import SUMMARY_LIMIT
+from rhr.hitmap import _under
 from rhr.ir import load_ir
 from rhr.rbxl_raw import EMPTY_TERRAIN_SMOOTH_GRID, BinaryRbxError, extract_serialized_string_property
 from rhr.studio import content_path, studio_content
@@ -185,7 +187,9 @@ def build_scene_dump(
     """The scene dump of an IR file. With `world`, only what a 3D view draws
     (rhr.ir.world_roots), plus `_storedNote` naming what it left out, for the
     render commands' report. With `parts` False, `parts` and `bounds` are left empty:
-    what a render's notes need (counts, missing assets) without per-part geometry."""
+    what a render's notes need (counts, missing assets) without per-part geometry.
+    When a Terrain's SmoothGrid could not be read from the source file, its `empty`
+    is None and `_terrainUnread` says why."""
     for lookup in (_mesh_available, _union_available, _asset_available):
         lookup.cache_clear()
     data = load_ir(ir_path)
@@ -231,17 +235,22 @@ def build_scene_dump(
     overall_max = [-math.inf, -math.inf, -math.inf]
     terrain_summaries: list[dict] = []
     parent_by_id: dict[int, dict] = {}
-    terrain_payloads: list[bytes] = []
+    # One entry per Terrain in file order, None where the file leaves SmoothGrid out;
+    # when the file cannot be read, `terrain_unread` says why.
+    terrain_payloads: list[bytes | None] = []
+    terrain_unread: str | None = None
     source_path = data.get("sourcePath")
-    if source_path:
-        candidate = Path(source_path)
-        if candidate.is_file():
-            try:
-                terrain_payloads = extract_serialized_string_property(
-                    candidate, "Terrain", "SmoothGrid"
-                )
-            except (OSError, BinaryRbxError, UnicodeError):
-                terrain_payloads = []
+    if not source_path:
+        terrain_unread = "the IR names no source file to read it from"
+    elif not Path(source_path).is_file():
+        terrain_unread = f"its source file {source_path} is gone"
+    else:
+        try:
+            terrain_payloads = extract_serialized_string_property(
+                Path(source_path), "Terrain", "SmoothGrid", per_instance=True
+            )
+        except (OSError, BinaryRbxError, UnicodeError) as exc:
+            terrain_unread = f"{source_path}: {exc}"
     terrain_index = 0
     shipped: dict[str, bool] = {}  # rbxasset:// key -> the install has it
 
@@ -264,7 +273,7 @@ def build_scene_dump(
     ) -> None:
         if parent is not None:
             parent_by_id[id(node)] = parent
-        nonlocal lighting, atmosphere, sky, terrain_index, experimental_materials
+        nonlocal lighting, atmosphere, sky, terrain_index, terrain_unread, experimental_materials
         class_name = node.get("className") or "Instance"
         props = node.get("props") or {}
         in_lighting = in_lighting or class_name == "Lighting"
@@ -343,9 +352,23 @@ def build_scene_dump(
             })
 
         if class_name == "Terrain":
+            if terrain_index >= len(terrain_payloads) and not terrain_unread:
+                terrain_unread = f"{source_path} holds fewer Terrains than the IR"
             payload = terrain_payloads[terrain_index] if terrain_index < len(terrain_payloads) else None
             terrain_index += 1
-            empty = payload == EMPTY_TERRAIN_SMOOTH_GRID if payload is not None else None
+            # A Terrain the file holds no SmoothGrid for is taken as the empty grid,
+            # as Studio loads it: a place Rojo 7.7.0 built from a bare
+            # `"Terrain": {"$className": "Terrain"}` (no SmoothGrid in the file) opened
+            # in Studio on 2026-11-03 with CountCells() 0 and every voxel within 64
+            # studs of the origin Air, and a 16-stud FillBlock then counted 64 cells.
+            # Terrain's SmoothGrid default is 01 05 in the reflection database Lune
+            # 0.10.5 bundles (rbx_reflection_database 3.0.0+roblox-728, see
+            # scripts/make_reflection.py). tests/test_scene_dump.py `terrain_grids`
+            # holds RHR to it. A grid not read is unknown (None).
+            if payload is not None:
+                empty = payload == EMPTY_TERRAIN_SMOOTH_GRID
+            else:
+                empty = None if terrain_unread else True
             decodes = False
             if payload is not None and not empty:
                 from rhr.terrain import TerrainFormatError, decode_smooth_grid
@@ -572,6 +595,8 @@ def build_scene_dump(
     })
     if stored_line:
         dump["_storedNote"] = stored_line
+    if terrain_unread and any(entry["empty"] is None for entry in terrain_summaries):
+        dump["_terrainUnread"] = terrain_unread
     return dump
 
 
@@ -617,14 +642,6 @@ def notes_line(scene_dump: dict) -> str:
         f"unsupported-visuals={sum(scene_dump['unsupportedVisualClasses'].values())} "
         f"missing-assets={missing_assets} experimental={experimental or 'none'}"
     )
-
-
-# How many groups and missing assets a summary names before it only counts the rest.
-SUMMARY_LIMIT = 40
-
-
-def _under(path: str, prefix: str) -> bool:
-    return path == prefix or path.startswith(prefix + "/")
 
 
 def summarize(scene_dump: dict, path: str | None = None) -> dict:
@@ -713,6 +730,7 @@ def select(scene_dump: dict, *, path: str | None = None, classes: tuple[str, ...
 
 
 def dump_json(scene_dump: dict) -> str:
+    """The dump as JSON, without the `_` keys kept for the CLI's own messages."""
     from rhr.schema import dumps
 
-    return dumps(scene_dump)
+    return dumps({key: value for key, value in scene_dump.items() if not key.startswith("_")})
