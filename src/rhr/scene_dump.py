@@ -356,11 +356,15 @@ def build_scene_dump(
                 terrain_unread = f"{source_path} holds fewer Terrains than the IR"
             payload = terrain_payloads[terrain_index] if terrain_index < len(terrain_payloads) else None
             terrain_index += 1
-            # A Terrain the file holds no SmoothGrid for is taken as the empty grid:
+            # A Terrain the file holds no SmoothGrid for is taken as the empty grid,
+            # as Studio loads it: a place Rojo 7.7.0 built from a bare
+            # `"Terrain": {"$className": "Terrain"}` (no SmoothGrid in the file) opened
+            # in Studio on 2026-11-03 with CountCells() 0 and every voxel within 64
+            # studs of the origin Air, and a 16-stud FillBlock then counted 64 cells.
             # Terrain's SmoothGrid default is 01 05 in the reflection database Lune
             # 0.10.5 bundles (rbx_reflection_database 3.0.0+roblox-728, see
-            # scripts/make_reflection.py); that a file leaving it out loads as that
-            # default is not checked in Studio. A grid not read is unknown (None).
+            # scripts/make_reflection.py). tests/test_scene_dump.py `terrain_grids`
+            # holds RHR to it. A grid not read is unknown (None).
             if payload is not None:
                 empty = payload == EMPTY_TERRAIN_SMOOTH_GRID
             else:
