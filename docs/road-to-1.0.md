@@ -443,6 +443,24 @@ right.
 - Exit: the probe's six mistakes are found and its two correct labels are not flagged;
   at least 95% of error and warning findings on the corpus judged right; no command
   exits 0 with an empty result.
+- Done 2026-11-03, the exit's last part only: no command exits 0 with an empty result.
+  `tests/test_nothing_to_show.py` runs `ui`, `layout` (and `--rich`), `check`,
+  `hitmap`, `inspect`, `scene`, `preview` and `scene-dump` (and `--parts`) on 14
+  inputs: a UI model, a UI whose label is longer than stdout's allowance, a 3D model, an
+  empty Model, scripts only, a Rojo project that maps only code, one whose `$path` is
+  missing, a story that builds a label and one that
+  builds nothing, asset and place ids served from a seeded cache, and an id not cached.
+  Each shows something or exits 2 with a reason, and so does a `--path` that names
+  nothing, or only hidden UI for `hitmap` and `check`. A story whose screen holds no UI
+  that draws exits 2 and names what it built. A place whose only world is a Terrain
+  saved without SmoothGrid has no world: such a place loaded in Studio with
+  `CountCells()` 0. Checked by hand the same day, outside the test: `icons` on an empty
+  Model and `rhr batch` whose commands all have nothing exit 2 with the reason. Not
+  held: `icons` on a folder with no models exits 2 with only `0 drawn` on stderr;
+  `view` on an empty Model serves its page and does not say it is empty; `ir` writes an
+  empty Model's one node and exits 0 (a debug command, not judged). Asset and place ids
+  were tested offline from the cache, not downloaded. The probe and corpus parts of the
+  exit are not done.
 
 ### Phase 2: output an agent can use (2-3 days)
 
@@ -453,6 +471,20 @@ right.
   set at 30,000 characters on a generated 100k-part place, 2026-11-02);
   an agent can answer "what is at this pixel" and "show me only the shop screen" in one
   command each.
+- Done 2026-11-03, the budget part of the exit: every default output is under 30,000
+  characters (UTF-16 units, as Claude Code counts them) on a generated place of 100,000
+  parts whose StarterGui holds 32 ScreenGuis, 1,000 labels whose text spills out and
+  2,000 images not cached: `layout` 24,227, `layout --rich` 21,228, `hitmap` 19,121,
+  `ui --json` 12,066, `check` 8,181, `scene-dump` 4,470; `preview --json` 3,792 and
+  `scene --json` 3,775 on a world of 2,000 decals; `inspect` 13,974 on a model of 600
+  scripts. `tests/test_output_budget.py` holds it: `src/rhr/budget.py` cuts each list
+  that grows with the file on stdout, the `more*` counts say what was left out, and
+  `--all` lifts the cut. `inspect` on a 100,000-part place with no scripts
+  printed 513, by hand. Not held, by design, and named in docs/AGENTS.md: hitmap
+  `panes` and ui `screens` (a row per ScreenGui, so they grow with screens, not
+  parts), `ui --annotate`, `scene-dump --parts`, `inspect --all`, and `rhr batch`,
+  whose document holds its commands' together (45,341 for `layout` + `hitmap` on that
+  place). The real 116k-part place was not run.
 
 ### Phase 3: speed the agent feels (2-4 days, alongside Phase 2)
 
@@ -489,10 +521,14 @@ right.
 ### 1.0 is done when
 
 1. No command exits 0 with a blank or empty result, for any input kind: files, full and
-   partial Rojo projects, stories, asset and place ids.
+   partial Rojo projects, stories, asset and place ids. *Held by
+   `tests/test_nothing_to_show.py` since 2026-11-03, except `icons` on an empty folder
+   and `view` (Phase 1).*
 2. At least 95% of error and warning findings are right on the reviewed corpus.
 3. Every picture command reports missing and approximated assets in its JSON.
-4. Every default JSON output stays within its size budget on a 100k-part place.
+4. Every default JSON output stays within its size budget on a 100k-part place. *Held by
+   `tests/test_output_budget.py` since 2026-11-03 for each command alone, at 30,000
+   characters; not for `rhr batch` (Phase 2).*
 5. CI is green on Windows, macOS and Linux, including the fresh install from PyPI; one
    real Mac and one cloud agent run are written up.
 6. GOAL.md, the README, AGENTS.md and the skill agree.
