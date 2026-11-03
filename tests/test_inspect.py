@@ -4,7 +4,9 @@
 A made-up free model (XML) with a clean script, a backdoor `require(<id>)`, `getfenv`,
 a webhook, an obfuscated blob and a virus-named script: each finding is where it
 should be, with its line, and the clean code has none. The same model's classes,
-scripts and assets are counted; a binary fixture is read too.
+scripts and assets are counted; a binary fixture is read too. A file of many top-level
+Folders lists SUMMARY_LIMIT roots on stdout (`moreRoots` counts the rest) and all of them
+with --all or --out, and --all carries the summary's counts.
 
     python tests/test_inspect.py
 """
@@ -18,7 +20,9 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
+sys.path[:0] = [str(REPO / "src"), str(REPO / "tests")]
+
+from _models import script  # noqa: E402
 
 failures: list[str] = []
 
@@ -27,12 +31,6 @@ def check(ok: bool, message: str) -> None:
     print(f"  {'ok  ' if ok else 'FAIL'} {message}")
     if not ok:
         failures.append(message)
-
-
-def script(class_name: str, name: str, source: str, disabled: bool = False) -> str:
-    return (f'<Item class="{class_name}"><Properties><string name="Name">{name}</string>'
-            f'<bool name="Disabled">{str(disabled).lower()}</bool>'
-            f'<ProtectedString name="Source"><![CDATA[{source}]]></ProtectedString></Properties></Item>')
 
 
 NL = "\n"
@@ -53,6 +51,7 @@ MODEL = f"""<roblox version="4">
 
 
 def main() -> int:
+    from rhr.budget import SUMMARY_LIMIT
     from rhr.inspect import inspect
 
     with tempfile.TemporaryDirectory(prefix="rhr-inspect-") as directory:
@@ -62,6 +61,36 @@ def main() -> int:
                               encoding="utf-8", timeout=120)
         check(proc.returncode == 0, f"exit code {proc.returncode}: {proc.stderr[-300:]}")
         report = json.loads(proc.stdout)
+
+        # A file of many top-level instances: stdout lists the first SUMMARY_LIMIT roots
+        # and counts the rest; --out and --all list every one.
+        folders = Path(directory) / "Folders.rbxmx"
+        folders.write_text('<roblox version="4">' + "".join(
+            f'<Item class="Folder"><Properties><string name="Name">F{i}</string></Properties></Item>'
+            for i in range(SUMMARY_LIMIT + 7)) + "</roblox>", encoding="utf-8")
+        runs = {}
+        for extra in ([], ["--all"], ["--out", str(Path(directory) / "folders.json")]):
+            done = subprocess.run([sys.executable, "-m", "rhr", "inspect", str(folders), *extra],
+                                  capture_output=True, text=True, encoding="utf-8", timeout=120)
+            check(done.returncode == 0, f"inspect {' '.join(extra)} exits 0: {done.stderr[-300:]}")
+            text = Path(extra[1]).read_text(encoding="utf-8") if extra[:1] == ["--out"] else done.stdout
+            runs[tuple(extra[:1])] = (json.loads(text), done.stderr)
+    print("the roots")
+    shown, err = runs[()]
+    check(len(shown["roots"]) == SUMMARY_LIMIT and shown["moreRoots"] == 7,
+          f"stdout: {len(shown['roots'])} roots, moreRoots {shown.get('moreRoots')}")
+    check(f"{SUMMARY_LIMIT} of {SUMMARY_LIMIT + 7} roots on stdout" in err, f"the stderr note names the roots: {err!r}")
+    for flag in ("--all", "--out"):
+        whole, _ = runs[(flag,)]
+        check(len(whole["roots"]) == SUMMARY_LIMIT + 7 and whole["moreRoots"] == 0,
+              f"{flag}: {len(whole['roots'])} roots, moreRoots {whole.get('moreRoots')}")
+    print("inspect --all has the summary's counts")
+    for key, value in (("moreFindings", 0), ("moreScripts", 0), ("moreRoots", 0)):
+        check(report.get(key) == value, f"{key}: {report.get(key)!r}")
+    counted = {}
+    for finding in report["findings"]:
+        counted[finding["check"]] = counted.get(finding["check"], 0) + 1
+    check(report.get("findingCounts") == counted, f"findingCounts: {report.get('findingCounts')}")
     print("the report")
     check(report["schema"] == "rhr.inspect/1" and report["kind"] == "model", f"{report['schema']}, {report['kind']}")
     check(report["classCounts"].get("Script") == 3 and report["classCounts"].get("MeshPart") == 1, str(report["classCounts"]))

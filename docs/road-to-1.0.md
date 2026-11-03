@@ -302,7 +302,7 @@ place is not seen from its front with `--focus`. Fix: Roblox's meaning, and with
 the model's own pivot orientation. *Before the freeze. S.*
 
 **F19. Exit codes and notes for "nothing to do".** Decide once, for every command: empty
-input (F1), no world in a place, a story that builds nothing. Proposal: exit 2 with a
+input (F1), no world in a place, a story that builds no UI that draws. Proposal: exit 2 with a
 reason and a hint, never exit 0 with an empty document.
 
 ### 4.7 Platforms and outside dependencies
@@ -449,7 +449,8 @@ right.
 - F9, F10, F11 (`--device`, the default viewport decided), `hitmap --at`.
 - AGENTS.md rewritten around the real loops; `SKILL.md`; the contract snapshot updated
   and reviewed.
-- Exit: every default output on the 116k-part place within its budget (proposed 50 KB);
+- Exit: every default output on the 116k-part place within its budget (proposed 50 KB;
+  set at 30,000 characters on a generated 100k-part place, 2026-11-02);
   an agent can answer "what is at this pixel" and "show me only the shop screen" in one
   command each.
 

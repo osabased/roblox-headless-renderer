@@ -26,7 +26,8 @@ game: `--device phone` for a phone, `--topbar-height 0` to match Studio's edit v
 
 1. Edit.
 2. `rhr check <target>` (exit 1 = an error finding; fix errors, then warnings).
-   `rhr check <target> --baseline before.json` shows only what an edit added.
+   Before the first edit `rhr check <target> --out before.json`; after each,
+   `rhr check <target> --baseline before.json` shows only what the edit added.
 3. `rhr layout <target> --path <screen>`: rects as numbers; compare with what you meant.
 4. Look only when needed, small: `rhr ui <target> --only <screen> --fit --max-size 800
    --out shot.png` (`--annotate --json` numbers the buttons).
@@ -55,6 +56,11 @@ the element, where they are zero.
 
 - Pass paths back exactly as rhr printed them (`Card[2]`, not `Card`).
 - Exit 2 means it failed or had nothing to draw; stderr says why and what to try.
+- A long list is cut to fit stdout (`moreRects`, `moreFindings`, ... count the rest;
+  stderr says so): narrow with `--path`. On `layout`, `check`, `hitmap` and `inspect`,
+  `--out file.json` writes the default document uncut; `--all` prints it uncut too,
+  with hidden elements on `hitmap` and every script and asset id on `inspect`. On `ui`,
+  `scene` and `preview`, `--out` is the PNG.
 - Findings: `error` fix, `warning` weigh, `info` (`--min-severity info`) often intended.
   An `image-missing` warning is an image Roblox leaves blank too: use another. At
   `info` only rhr's picture leaves it out: tell whoever reviews the picture.

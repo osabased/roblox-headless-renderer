@@ -2,7 +2,8 @@
 
 `item` builds an Instance and `write_model` writes a tree of them as an .rbxmx file.
 A property is a plain bool, int, float or string, or a (tag, body) pair from the value
-helpers here.
+helpers here. `script` is one script's <Item> as XML text. `ir_udim2` and `ir_offset`
+are a UDim2 as an IR value, for tests that write IR JSON instead.
 
 QUADRANTS are test images of four flat quadrants, so a sample in each shows which way
 up an image is drawn. `quadrant_cache` puts them where render_ir finds cached images.
@@ -35,6 +36,14 @@ def scale(x, y):
     return udim2(x, 0, y, 0)
 
 
+def ir_udim2(xs, xo, ys, yo) -> dict:
+    return {"_t": "UDim2", "XS": xs, "XO": xo, "YS": ys, "YO": yo}
+
+
+def ir_offset(x, y) -> dict:
+    return ir_udim2(0, x, 0, y)
+
+
 def udim(s, o):
     return ("UDim", f"<S>{s}</S><O>{o}</O>")
 
@@ -61,6 +70,12 @@ def content(uri: str):
 
 def item(cls: str, name: str, props: dict | None = None, children=()) -> dict:
     return {"class": cls, "name": name, "props": props or {}, "children": list(children)}
+
+
+def script(class_name: str, name: str, source: str, disabled: bool = False) -> str:
+    return (f'<Item class="{class_name}"><Properties><string name="Name">{name}</string>'
+            f'<bool name="Disabled">{str(disabled).lower()}</bool>'
+            f'<ProtectedString name="Source"><![CDATA[{source}]]></ProtectedString></Properties></Item>')
 
 
 def _value(name: str, value) -> str:

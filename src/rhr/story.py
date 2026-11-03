@@ -62,12 +62,31 @@ import subprocess
 from pathlib import Path
 
 from rhr.paths import IR_DIR, PACKAGE
+from rhr.pipeline import NothingToDraw
 
 SUFFIXES = (".story.luau", ".story.lua")
 TIMEOUT_S = 120
 # Without layout passes a story time adds frames of about 20 ms on a 900-element screen;
 # with them the limit runs from the last pass (rhr.story_sizes.run).
 TIMEOUT_PER_STORY_SECOND = 2.0
+
+
+class BuiltNothing(NothingToDraw):
+    """A story whose screen holds no UI that draws: no GuiObject besides the target
+    that is shown (it and every GuiObject above it Visible), as story-runtime.luau's
+    RHR-BUILT line reads the screen.
+
+    `holds` is the classes the screen holds besides the target, sorted (empty:
+    the story parented nothing there). `timers` is how many timers (task.delay,
+    task.wait, delay, wait) were still waiting when the story was captured, at `time`
+    seconds of story time; `due` is when the next was due (None without one)."""
+
+    def __init__(self, message: str, *, holds: list[str], timers: int, time: float, due: float | None):
+        super().__init__(message)
+        self.holds = holds
+        self.timers = timers
+        self.time = time
+        self.due = due
 
 
 def is_story(path: Path) -> bool:
@@ -215,11 +234,54 @@ def _motion(stdout: str, files: dict[str, str], root: Path) -> tuple[str, list[s
     return f"captured at the {time:g} s cap", problems
 
 
+def _built(stdout: str, files: dict[str, str], root: Path) -> dict:
+    """What the story's screen held when it was captured (its RHR-BUILT line), and the
+    capture's time and the timers still waiting then (its RHR-MOTION line), pointed at
+    the project's files: what _draws_something reads, kept in the cache stamp."""
+    built = re.search(r"^RHR-BUILT (.+)$", stdout, re.MULTILINE)
+    motion = re.search(r"^RHR-MOTION (.+)$", stdout, re.MULTILINE)
+    held = json.loads(built.group(1)) if built else {}
+    moved = json.loads(motion.group(1)) if motion else {}
+    # (An empty Luau table is written as {}: `or []` reads it as an empty list.)
+    return {"shown": int(held.get("shown") or 0), "classes": list(held.get("classes") or []),
+            "hidden": list(held.get("hidden") or []), "hiddenCount": int(held.get("hiddenCount") or 0),
+            "time": float(moved.get("time") or 0),
+            "timers": [{"due": float(timer["due"]),
+                        "at": _point_at_files(timer["at"], files, root) if timer.get("at") else None}
+                       for timer in moved.get("timers") or []]}
+
+
+def _draws_something(built: dict) -> None:
+    """Raise BuiltNothing, saying what the screen holds, unless the story built UI that
+    draws (`built` from _built)."""
+    if built.get("shown"):
+        return
+    classes, hidden, timers = built.get("classes") or [], built.get("hidden") or [], built.get("timers") or []
+    message = "no UI to draw"
+    if hidden:
+        more = int(built.get("hiddenCount") or 0) - len(hidden)
+        message += (f": every GuiObject the story built is hidden (Visible = false): {', '.join(hidden)}"
+                    + (f", +{more} more" if more > 0 else ""))
+    elif classes:
+        message += f": the story built only {', '.join(classes)}, which draw nothing alone"
+    time = float(built.get("time") or 0)
+    due = min((timer["due"] for timer in timers), default=None)
+    if timers:
+        places = sorted({timer["at"] for timer in timers if timer.get("at")})
+        message += (f"\n{len(timers)} timer(s) still waiting when it was captured at {time:.2f} s of story time, "
+                    f"the next due at {due:.2f} s" + (f" ({', '.join(places[:4])})" if places else "")
+                    + ": a later --story-time may show what they build")
+    raise BuiltNothing(message, holds=list(classes), timers=len(timers), time=time, due=due)
+
+
 def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: float | None = None,
           story_time: float | None = None, log=None) -> Path:
     """Run `story` on a `width` x `height` screen (the `--device` one's insets and
     input, a `topbar_height` top bar, 58 by default) and return the model file with
-    the UI it built: once it has settled, or at `story_time` seconds of story time."""
+    the UI it built: once it has settled, or at `story_time` seconds of story time.
+    A story whose screen holds no UI that draws raises BuiltNothing (a
+    rhr.pipeline.NothingToDraw), for every command and when reused from the cache:
+    its screen and target alone would draw blank and lay out one empty rect."""
     from rhr import devices, insets, rojo, story_sizes
     from rhr.ir import lune_executable
     from rhr.server import code_stamp
@@ -246,52 +308,57 @@ def build(story: Path, *, width: int = 1920, height: int = 1080, topbar_height: 
         # calls answer the passes the story reads.
         inputs = json.dumps([str(story.resolve()), rojo.inputs_digest(project), width, height, area, sizes, when,
                              code_stamp(), str(lune_executable())])
+    record = None
     try:
         kept = json.loads(stamp.read_text(encoding="utf-8"))
         if out.is_file() and kept.get("inputs") == inputs:
-            if log is not None:
-                log(f"story  {story.name}: unchanged since its last run, reused the UI it built "
-                    f"({kept.get('count', '?')} instances{', ' + kept['saved'] if kept.get('saved') else ''})")
-                for line in kept.get("problems", [])[:10]:
-                    log(f"story  {line}")
-            return out
+            record = kept
     except (OSError, ValueError, AttributeError):
         pass
-    stamp.unlink(missing_ok=True)
-    with phase("story: rojo build"):
-        built = rojo.build(project, IR_DIR)
-    with phase("story: rojo sourcemap"):
-        names, files = module_path(project, story)
-    passes = story_sizes.Passes(core.rect(width, height)) if sizes == "on" else None
-    timeout = TIMEOUT_S + TIMEOUT_PER_STORY_SECOND * (story_time or 0)
-    with phase("story: run (Lune)"):
-        try:
-            proc, stats = story_sizes.run(
-                [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built),
-                 json.dumps(names), str(out), str(width), str(height), name, area, sizes, when], passes,
-                timeout=timeout)
-        except subprocess.TimeoutExpired:
-            stalled = (f"no frame came for {timeout:g} s after {passes.count} layout passes" if passes is not None
-                       else f"it had not finished after {timeout:g} s")
-            raise RuntimeError(f"the story {story.name} was stopped: {stalled}. Code that loops without "
-                               "yielding (task.wait) never ends a frame") from None
-    if passes is not None:
-        add("story: layout passes (Python)", passes.seconds)
-        add("story: layout passes (round trip)", float(stats.get("seconds") or 0))
-    problems = _tidy(_point_at_files(proc.stderr.strip(), files, project.parent))
-    if passes is not None and passes.problems:
-        problems = "\n".join([*passes.problems, *filter(None, [problems])])
-    if proc.returncode != 0 or not out.is_file():
-        raise RuntimeError(f"the story {story.name} failed:\n{problems or proc.stdout.strip() or 'no output'}")
-    count = proc.stdout.strip().rpartition(" ")[2]
-    saved, still_moving = _motion(proc.stdout, files, project.parent)
-    problems = "\n".join([*still_moving, *filter(None, [problems])])
-    stamp.write_text(json.dumps({"inputs": inputs, "count": count, "saved": saved,
-                                 "problems": problems.splitlines()}), encoding="utf-8")
-    if log is not None:
-        log(f"story  {story.name}: ran it in its Rojo project, {count} instances built" + (
-            f", {passes.count} layout passes ({passes.skipped} with nothing new to lay out) in {passes.seconds:.2f} s"
-            if passes is not None else "") + (f", {saved}" if saved else ""))
-        for line in problems.splitlines()[:10]:
-            log(f"story  {line}")
+    if record is not None:
+        if log is not None:
+            log(f"story  {story.name}: unchanged since its last run, reused the UI it built "
+                f"({record.get('count', '?')} instances{', ' + record['saved'] if record.get('saved') else ''})")
+            for line in record.get("problems", [])[:10]:
+                log(f"story  {line}")
+    else:
+        stamp.unlink(missing_ok=True)
+        with phase("story: rojo build"):
+            built = rojo.build(project, IR_DIR)
+        with phase("story: rojo sourcemap"):
+            names, files = module_path(project, story)
+        passes = story_sizes.Passes(core.rect(width, height)) if sizes == "on" else None
+        timeout = TIMEOUT_S + TIMEOUT_PER_STORY_SECOND * (story_time or 0)
+        with phase("story: run (Lune)"):
+            try:
+                proc, stats = story_sizes.run(
+                    [lune_executable(), "run", str(PACKAGE / "luau" / "story-runtime.luau"), str(built),
+                     json.dumps(names), str(out), str(width), str(height), name, area, sizes, when], passes,
+                    timeout=timeout)
+            except subprocess.TimeoutExpired:
+                stalled = (f"no frame came for {timeout:g} s after {passes.count} layout passes"
+                           if passes is not None else f"it had not finished after {timeout:g} s")
+                raise RuntimeError(f"the story {story.name} was stopped: {stalled}. Code that loops without "
+                                   "yielding (task.wait) never ends a frame") from None
+        if passes is not None:
+            add("story: layout passes (Python)", passes.seconds)
+            add("story: layout passes (round trip)", float(stats.get("seconds") or 0))
+        problems = _tidy(_point_at_files(proc.stderr.strip(), files, project.parent))
+        if passes is not None and passes.problems:
+            problems = "\n".join([*passes.problems, *filter(None, [problems])])
+        if proc.returncode != 0 or not out.is_file():
+            raise RuntimeError(f"the story {story.name} failed:\n{problems or proc.stdout.strip() or 'no output'}")
+        count = proc.stdout.strip().rpartition(" ")[2]
+        saved, still_moving = _motion(proc.stdout, files, project.parent)
+        problems = "\n".join([*still_moving, *filter(None, [problems])])
+        record = {"inputs": inputs, "count": count, "saved": saved, "problems": problems.splitlines(),
+                  "built": _built(proc.stdout, files, project.parent)}
+        stamp.write_text(json.dumps(record), encoding="utf-8")
+        if log is not None:
+            log(f"story  {story.name}: ran it in its Rojo project, {count} instances built" + (
+                f", {passes.count} layout passes ({passes.skipped} with nothing new to lay out) in "
+                f"{passes.seconds:.2f} s" if passes is not None else "") + (f", {saved}" if saved else ""))
+            for line in problems.splitlines()[:10]:
+                log(f"story  {line}")
+    _draws_something(record.get("built") or {})
     return out

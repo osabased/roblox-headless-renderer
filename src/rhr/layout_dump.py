@@ -24,10 +24,12 @@ How each field is resolved (and what is honestly not resolvable):
                 documents it rather than inventing a second path scheme.
   class         flatten_node's `type` (the Roblox className).
   zIndex        the engine's `zIndex` (Roblox default 1, reported explicitly).
-  visible       False only when the node itself says so; an ancestor's
-                `Visible=false` removes the subtree from the paint pass
-                entirely, so such nodes are absent from the dump, not marked
-                invisible.
+  visible       always true in practice: the paint pass returns at a node
+                with `Visible=false` before it records the node's rect
+                (ui_engine.renderer), so that node and its whole subtree are
+                absent from the dump, not marked invisible. A ScreenGui with
+                `Enabled=false` is not laid out at all, unless --show or
+                --only opens it.
   background    the converted `bg` ([r, g, b] 0-255) plus `bgTransparency`.
                 Visual classes get the engine's default white when the model
                 does not set BackgroundColor3 — that is what paints.

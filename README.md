@@ -102,8 +102,8 @@ rhr skill --install .claude/skills      # this project; ~/.claude/skills for all
 ```markdown
 ## Seeing the UI and builds
 Use `rhr` (roblox-headless-renderer) to check Roblox UI and 3D work without Studio:
-`rhr check <target>` after each edit (exit 1 = error findings; `--baseline before.json`
-for only what the edit added), `rhr layout <target> --path <screen>` for rects,
+`rhr check <target>` after each edit (exit 1 = error findings; `--out before.json` first,
+then `--baseline before.json` for only what the edit added), `rhr layout <target> --path <screen>` for rects,
 `rhr ui <target> --only <screen> --fit --max-size 800 --out shot.png` to look, and
 `rhr check <target> --devices all` before done. The target is the project, a
 `*.story.luau`, or the place file when the UI is saved in Studio. `rhr skill` prints

@@ -185,15 +185,19 @@ def extract_xml_binary_string_property(
     path: str | Path,
     class_name: str,
     property_name: str,
-) -> list[bytes]:
+    *,
+    per_instance: bool = False,
+) -> list[bytes | None]:
     """Recover base64 BinaryString values from an XML Roblox file.
 
     This intentionally uses a narrow textual scan instead of materializing a
     second DOM. It is only a companion to extract_string_property for hidden
-    serialized values such as Terrain.SmoothGrid.
+    serialized values such as Terrain.SmoothGrid. An instance without the property
+    is skipped, or with `per_instance` gives None, so the list has one entry per
+    instance of the class, in file order.
     """
     text = Path(path).read_text(encoding="utf-8", errors="strict")
-    results: list[bytes] = []
+    results: list[bytes | None] = []
     item_pattern = re.compile(
         rf'<Item\s+class="{re.escape(class_name)}"(?:\s[^>]*)?>.*?</Item>',
         flags=re.DOTALL,
@@ -205,6 +209,8 @@ def extract_xml_binary_string_property(
     for item in item_pattern.finditer(text):
         match = property_pattern.search(item.group(0))
         if not match:
+            if per_instance:
+                results.append(None)
             continue
         encoded = re.sub(r"<!\[CDATA\[|\]\]>|\s+", "", match.group(1))
         try:
@@ -220,13 +226,17 @@ def extract_serialized_string_property(
     path: str | Path,
     class_name: str,
     property_name: str,
-) -> list[bytes]:
-    """Extract a serialized string/BinaryString from binary or XML Roblox files."""
+    *,
+    per_instance: bool = False,
+) -> list[bytes | None]:
+    """Extract a serialized string/BinaryString from binary or XML Roblox files.
+    With `per_instance`, one entry per instance of the class, None where the file
+    holds no value for it."""
     source = Path(path)
     prefix = source.read_bytes()[:8]
     if prefix == MAGIC:
-        return extract_string_property(source, class_name, property_name)
-    return extract_xml_binary_string_property(source, class_name, property_name)
+        return extract_string_property(source, class_name, property_name, per_instance=per_instance)
+    return extract_xml_binary_string_property(source, class_name, property_name, per_instance=per_instance)
 
 
 EMPTY_TERRAIN_SMOOTH_GRID = b"\x01\x05"
@@ -246,11 +256,15 @@ def extract_string_property(
     path: str | Path | bytes,
     class_name: str,
     property_name: str,
-) -> list[bytes]:
+    *,
+    per_instance: bool = False,
+) -> list[bytes | None]:
     """Return raw string/BinaryString values for one class/property.
 
     Values are returned in the class's INST order. Most services such as Terrain
     have exactly one value in a place file. `path` may also be the file's bytes.
+    A file with no PROP chunk for the property gives [], or with `per_instance`
+    None for each instance of the class.
     """
     data = bytes(path) if isinstance(path, (bytes, bytearray)) else Path(path).read_bytes()
     classes: dict[int, tuple[str, int]] = {}
@@ -314,4 +328,6 @@ def extract_string_property(
                 values.append(value)
             results = values
 
+    if results is None and per_instance and wanted_id is not None:
+        return [None] * classes[wanted_id][1]
     return results or []

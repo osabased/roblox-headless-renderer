@@ -21,6 +21,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from _models import ir_udim2
+
 ROOT = Path(__file__).resolve().parents[1]
 RHR = [sys.executable, "-m", "rhr"]
 
@@ -34,10 +36,6 @@ VIEWS = {
     "Top": ("0,14,0.01", ("left", "bottom"), ("left", "top")),
     "Bottom": ("0,-14,-0.01", ("left", "bottom"), ("left", "top")),
 }
-
-
-def udim2(xs: float, ys: float, xo: float = 0, yo: float = 0) -> dict:
-    return {"_t": "UDim2", "XS": xs, "XO": xo, "YS": ys, "YO": yo}
 
 
 def frame(name: str, position: dict, size: dict, rgb: tuple[float, float, float]) -> dict:
@@ -59,8 +57,8 @@ def scene(face: str) -> dict:
             "PixelsPerStud": 20, "LightInfluence": 0, "Enabled": True,
         },
         "children": [
-            frame("TopLeft", udim2(0, 0), udim2(0.5, 0.5), (1, 0, 0)),
-            frame("TopRight", udim2(0.75, 0), udim2(0.25, 0.25), (0, 0, 1)),
+            frame("TopLeft", ir_udim2(0, 0, 0, 0), ir_udim2(0.5, 0, 0.5, 0), (1, 0, 0)),
+            frame("TopRight", ir_udim2(0.75, 0, 0, 0), ir_udim2(0.25, 0, 0.25, 0), (0, 0, 1)),
         ],
     }
     part = {

@@ -29,6 +29,7 @@ from pathlib import Path
 # Offline and without Studio even when run by hand (`--update`): otherwise assets
 # download, the missing-asset lists come out empty, and their fields leave the snapshot.
 import _harness  # noqa: E402,F401
+from _models import ir_offset, script
 
 ROOT = Path(__file__).resolve().parents[1]
 RHR = [sys.executable, "-m", "rhr"]
@@ -39,6 +40,10 @@ FIX = ROOT / "tests" / "fixtures"
 # material names): their keys are "*" in the snapshot.
 DYNAMIC = {
     "layout": {"rects"},
+    "layout-rich": {"nodes[].shortened"},
+    "check": {"findingCounts"},
+    "inspect": {"classCounts", "findingCounts"},
+    "inspect --all": {"classCounts", "findingCounts"},
     "scene-dump": {"classCounts", "fallbacks", "materialFallbacks", "unsupportedVisualClasses", "experimental"},
     "scene-summary": {"classCounts", "fallbacks", "materialFallbacks", "unsupportedVisualClasses", "experimental"},
     "render": {"fallbacks", "materialFallbacks", "unsupportedVisualClasses", "experimental"},
@@ -103,24 +108,52 @@ def contract_scene() -> dict:
         {"className": "Workspace", "name": "Workspace", "props": {}, "children": world}, lighting]}
 
 
+def contract_ui() -> dict:
+    """An IR UI too big for stdout, so `layout`, `layout --rich` and `hitmap` cut it and
+    fill `cut`: 40 frames of 30 buttons each, and a label whose text is longer than the
+    whole allowance, so its rich node is kept `shortened`."""
+    frames = [{"className": "Frame", "name": f"Row{r}", "props": {"Size": ir_offset(1900, 20),
+                                                                   "Position": ir_offset(0, 80 + r * 24)},
+               "children": [{"className": "TextButton", "name": f"Button{b}", "props": {
+                   "Size": ir_offset(60, 20), "Position": ir_offset(b * 62, 0), "Text": f"B{b}"}, "children": []}
+                   for b in range(30)]} for r in range(40)]
+    label = {"className": "TextLabel", "name": "Rules", "children": [],
+             "props": {"Size": ir_offset(400, 40), "Text": "lorem ipsum " * 2500}}
+    return {"sourcePath": "contract-ui", "roots": [{"className": "StarterGui", "name": "StarterGui", "props": {},
+            "children": [{"className": "ScreenGui", "name": "Big", "props": {"Enabled": True},
+                          "children": [label, *frames]}]}]}
+
+
+def flagged_model(path: Path) -> None:
+    """A model whose script calls getfenv, so `inspect` lists a finding and its script."""
+    path.write_text('<roblox version="4"><Item class="Model" referent="M"><Properties><string name="Name">Free'
+                    '</string></Properties>' + script("Script", "Spread", "local env = getfenv(1)") +
+                    '<Item class="Decal" referent="D"><Properties><string name="Name">Decal'
+                    '</string><Content name="Texture"><url>rbxassetid://1000001</url></Content></Properties></Item>'
+                    '</Item></roblox>', encoding="utf-8")
+
+
 def run(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([*RHR, *args], capture_output=True, text=True, cwd=ROOT, timeout=300)
 
 
 def json_outputs(tmp: Path) -> tuple[dict[str, dict], dict[str, int]]:
-    """{schema kind: {"version": n, "fields": {path: [types]}}}, and the exit codes seen."""
+    """{schema kind: {"version": n, "fields": {path: [types]}}}, and the exit codes seen.
+    A run given its own *kind* keeps its own shape under that name instead of adding
+    its fields to its schema's, so a field it alone leaves out is seen."""
     shapes: dict[str, dict[str, set[str]]] = {}
     versions: dict[str, str] = {}
     exits: dict[str, int] = {}
 
-    def record(label: str, proc: subprocess.CompletedProcess, expect: int = 0) -> None:
+    def record(label: str, proc: subprocess.CompletedProcess, expect: int = 0, kind: str | None = None) -> None:
         exits[label] = proc.returncode
         assert proc.returncode == expect, f"{label}: exit {proc.returncode}\n{proc.stderr[-800:]}"
         document = json.loads(proc.stdout)
         name, version = document["schema"].removeprefix("rhr.").split("/")
         versions.setdefault(name, version)
         assert versions[name] == version, (label, versions[name], version)
-        shape(document, name, "", shapes.setdefault(name, {}))
+        versions.setdefault(kind or name, version)
+        shape(document, kind or name, "", shapes.setdefault(kind or name, {}))
 
     shop = ROOT / "examples" / "shop.rbxmx"
     record("layout", run("layout", str(shop)))
@@ -129,6 +162,16 @@ def json_outputs(tmp: Path) -> tuple[dict[str, dict], dict[str, int]]:
     record("check (error finding)", run("check", str(FIX / "zero_grid_cell.rbxmx")), expect=1)
     record("hitmap", run("hitmap", str(FIX / "hitmap_overlap.rbxmx")))
     record("hitmap --at", run("hitmap", str(FIX / "hitmap_overlap.rbxmx"), "--at", "100,60"))
+    big_ui = tmp / "contract-ui.json"
+    big_ui.write_text(json.dumps(contract_ui()), encoding="utf-8")
+    for label, args in (("layout", ()), ("layout --rich", ("--rich",))):
+        record(f"{label} (cut to fit)", run("layout", str(big_ui), *args))
+    record("hitmap (cut to fit)", run("hitmap", str(big_ui)))
+    flagged = tmp / "flagged.rbxmx"
+    flagged_model(flagged)
+    record("inspect", run("inspect", str(flagged)))
+    # Its own shape: merged into inspect's, a field --all leaves out would still pass.
+    record("inspect --all", run("inspect", str(flagged), "--all"), kind="inspect --all")
     for name in ("scene_lighting", "beam_transparency", "trail_motion", "particle_scene",
                  "scene_material_textures", "preview_world_ui", "scene_two_cameras"):
         record(f"scene-dump {name}", run("scene-dump", "--parts", str(FIX / f"{name}.rbxmx")))
@@ -242,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
     current = build()
     if update or not SNAPSHOT.is_file():
         SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
-        SNAPSHOT.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        # LF as .gitattributes keeps it: text mode would write CRLF on Windows.
+        SNAPSHOT.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
         print(f"contract: snapshot written to {SNAPSHOT.relative_to(ROOT)}")
         return 0
     snapshot = json.loads(SNAPSHOT.read_text(encoding="utf-8"))

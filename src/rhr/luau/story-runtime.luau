@@ -1203,6 +1203,34 @@ table.sort(motion.timers, function(a, b)
 end)
 print("RHR-MOTION " .. serde.encode("json", motion))
 
+-- What the story built, for rhr.story to tell UI from none. UI is a GuiObject besides
+-- the target that shows on the screen (shownWithin: it and every GuiObject above it
+-- Visible); a layout, a Folder or hidden elements alone draw nothing. RHR-BUILT names
+-- the classes the screen holds besides the target, sorted, and the outermost hidden
+-- elements.
+local built = { shown = 0, classes = {}, hidden = {}, hiddenCount = 0 }
+local classSeen = {}
+for _, instance in screen:GetDescendants() do
+	if instance:IsA("GuiObject") and not instance.Visible and shownWithin(instance.Parent, screen) then
+		built.hiddenCount += 1
+		if #built.hidden < 5 then
+			table.insert(built.hidden, paths[instance] or instance:GetFullName())
+		end
+	end
+	if instance == target then
+		continue
+	end
+	if instance:IsA("GuiObject") and shownWithin(instance, screen) then
+		built.shown += 1
+	end
+	if not classSeen[instance.ClassName] then
+		classSeen[instance.ClassName] = true
+		table.insert(built.classes, instance.ClassName)
+	end
+end
+table.sort(built.classes)
+print("RHR-BUILT " .. serde.encode("json", built))
+
 fixFonts(screen)
 local okSave, saveProblem = pcall(function()
 	fs.writeFile(outPath, roblox.serializeModel({ screen }))

@@ -2,7 +2,7 @@
 """The checks: eight model smells, each fixture that trips it, pixels not internals.
 
 Task 2.2: `rhr check` runs eight checks over a model and reports
-findings as JSON; a build loop refuses to ship on error-class findings. Three
+findings as JSON; a build loop refuses to ship on error-class findings. Four
 things are measured here, not claimed:
 
   * every check's fixture actually trips it (right check, right path, right
@@ -10,7 +10,9 @@ things are measured here, not claimed:
   * the truncation follow-up draws: TextTruncate AtEnd/SplitWord renders a
     shorter ink extent than the same label untruncated, ending in an
     ellipsis (glyph pixels, not internals);
-  * findings are deterministic: two runs byte-identical.
+  * findings are deterministic: two runs byte-identical;
+  * `--path` that names only hidden UI says so (and that `--show` checks it), and
+    one that names nothing says there is no UI under it.
 
 Run: python tests/test_checks.py
 """
@@ -25,6 +27,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "tests"))
+from _models import ir_offset  # noqa: E402
+
 RHR = [sys.executable, "-m", "rhr"]
 FIXTURES = REPO / "tests" / "fixtures"
 OUT = REPO / "out" / "checks"
@@ -235,6 +239,26 @@ def main() -> int:
     check(split_hi <= none_hi, f"SplitWord's ink stays within the untruncated clip ({split_hi} <= {none_hi})")
     check(end_hi < split_hi, f"AtEnd's ink ends left of SplitWord's: it keeps whole words ({end_hi} < {split_hi})")
 
+    print("checks: --path tells a hidden panel from a path that names nothing")
+    closed = OUT / "closed.json"
+    closed.parent.mkdir(parents=True, exist_ok=True)
+    closed.write_text(json.dumps(closed_screens_ir()), encoding="utf-8")
+
+    def check_path(path: str, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run([*RHR, "check", str(closed), "--path", path, *extra], cwd=str(REPO),
+                              capture_output=True, text=True, timeout=300)
+
+    typo = check_path("StarterGui/Open/Nothing")
+    check(typo.returncode == 2 and "no UI under StarterGui/Open/Nothing" in typo.stderr,
+          f"a path naming nothing: no UI under it ({typo.returncode}, {typo.stderr.strip()[-160:]})")
+    for path, count in (("StarterGui/Open/Panel", 2), ("StarterGui/Shop", 2)):
+        hidden = check_path(path)
+        check(hidden.returncode == 2 and f"only hidden UI under {path} ({count})" in hidden.stderr
+              and f"--show {path}" in hidden.stderr,
+              f"{path}: only hidden UI, and --show checks it ({hidden.returncode}, {hidden.stderr.strip()[-200:]})")
+    shown = check_path("StarterGui/Open/Panel", "--show", "StarterGui/Open/Panel")
+    check(shown.returncode == 0, f"--show checks the hidden panel ({shown.returncode}, {shown.stderr.strip()[-160:]})")
+
     print("checks: findings are deterministic")
     import hashlib
 
@@ -246,6 +270,19 @@ def main() -> int:
 
     print("checks: ok" if not failures else f"checks: {len(failures)} failed")
     return 1 if failures else 0
+
+
+def closed_screens_ir() -> dict:
+    """An open screen with a hidden panel in it, and a disabled screen."""
+    def button(name: str) -> dict:
+        return {"className": "TextButton", "name": name, "props": {"Size": ir_offset(100, 40), "Text": name}, "children": []}
+
+    return {"sourcePath": "closed", "roots": [{"className": "StarterGui", "name": "StarterGui", "props": {}, "children": [
+        {"className": "ScreenGui", "name": "Open", "props": {"Enabled": True}, "children": [
+            {"className": "Frame", "name": "Panel", "props": {"Size": ir_offset(300, 300), "Visible": False},
+             "children": [button("Buy")]},
+            button("Play")]},
+        {"className": "ScreenGui", "name": "Shop", "props": {"Enabled": False}, "children": [button("Buy")]}]}]}
 
 
 def test_main():

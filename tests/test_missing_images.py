@@ -293,7 +293,8 @@ def check_ui(check, ir: Path, cache: Path, tmp: Path) -> bool:
 
 
 def check_check(check, ir: Path, cache: Path, old_url_drawn: bool) -> None:
-    result, code = run(["check", str(ir), "--viewport", "x".join(map(str, SCREEN)), "--min-severity", "info"], cache)
+    result, code = run(["check", str(ir), "--viewport", "x".join(map(str, SCREEN)), "--min-severity", "info",
+                        "--all"], cache)
     findings = [f for f in result.get("findings", []) if f.get("check") == "image-missing"]
     found = [(f["paths"][0], f["severity"]) for f in findings]
     want = {(path, "warning" if uri == REFUSED else "info")

@@ -76,12 +76,12 @@ BROWSER = {
     "test_billboard", "test_browser_session", "test_particles",
     "test_preview", "test_preview_particles", "test_surface", "test_viewport_frame", "test_kept_page",
     "test_visual_gallery", "test_place_realism", "test_terrain", "test_contract", "test_browser_lifetime", "test_large_place",
-    "test_icons",
+    "test_icons", "test_nothing_to_show", "test_output_budget",
 }
 NOT_LUNE = {
     "test_compare", "test_groundtruth_diff", "test_mesh_assets", "test_project", "test_roblox_assets", "test_cache",
     "test_scroll_scale", "test_text_newlines", "test_textscaled_stroke", "test_browsers", "test_browser_lifetime", "test_large_place",
-    "test_changelog",
+    "test_changelog", "test_budget",
 }
 STUDIO = {"test_studio_smoke"}
 SMOKE = {
