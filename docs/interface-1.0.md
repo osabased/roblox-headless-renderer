@@ -156,7 +156,8 @@ or flag is allowed and printed. After an intentional change:
 - **Pictures**: `ui --crop PATH`, `--fit`, `--annotate` (report: `crop`, `scale`,
   `annotations[]` of `{n, path, class, rect}`), `--max-size PX` on `ui`, `scene`,
   `preview` (report: `scale`, `size` of the written PNG).
-- **`rhr skill [--install DIR]`**: the agent skill.
+- **`rhr skill [--install DIR]`**: the agent skill. `--install` writes `DIR/rhr/SKILL.md`,
+  a stub with the skill's name and description that has the agent run `rhr skill`.
 
 ## Before the freeze (2026-11-02): an output budget, and nothing to show
 
