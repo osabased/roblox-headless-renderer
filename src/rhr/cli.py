@@ -664,20 +664,33 @@ def _check_devices(args, source, baseline) -> dict:
     return document
 
 
+SKILL_STUB = """
+# rhr
+
+Before using rhr, run `rhr skill` and follow what it prints: the guide to the rhr
+installed on this machine, its commands, flags and loop. `rhr skill --install` wrote
+this file; the guide stays inside rhr, so it is current after every upgrade.
+"""
+
+
 def _skill(args) -> int:
-    """`rhr skill`: the agent skill (SKILL.md) on stdout, or installed where an agent
-    looks for skills (`--install .claude/skills` in a project, `~/.claude/skills` for a
-    user; Codex reads the same format)."""
+    """`rhr skill`: the agent skill (SKILL.md) on stdout, or a stub of it installed where
+    an agent looks for skills (`--install .claude/skills` in a project, `~/.claude/skills`
+    for a user; Codex reads the same format). The stub keeps the skill's name and
+    description and sends the agent to `rhr skill`."""
     from rhr.paths import PACKAGE
 
     text = (PACKAGE / "skill" / "SKILL.md").read_text(encoding="utf-8")
     if not args.install:
         print(text, end="")
         return 0
+    # A copy of the whole guide would go stale when rhr is upgraded and the copy is not:
+    # the stub reads it from the rhr installed.
+    front = text[:text.index("\n---\n", 4) + 5]
     target = Path(args.install).expanduser() / "rhr" / "SKILL.md"
     target.parent.mkdir(parents=True, exist_ok=True)
-    # LF as shipped: write_text would give the copy Windows line endings.
-    target.write_text(text, encoding="utf-8", newline="\n")
+    # LF as shipped: write_text would give the stub Windows line endings.
+    target.write_text(front + SKILL_STUB, encoding="utf-8", newline="\n")
     print(target)
     return 0
 
@@ -1450,7 +1463,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_skill = sub.add_parser("skill", help="the agent skill (SKILL.md for Claude Code and Codex): print it, "
                                           "or --install it into a skills folder")
     p_skill.add_argument("--install", metavar="DIR",
-                         help="write DIR/rhr/SKILL.md (e.g. .claude/skills, or ~/.claude/skills)")
+                         help="write DIR/rhr/SKILL.md, a stub that has the agent read the skill from "
+                              "`rhr skill` (e.g. .claude/skills, or ~/.claude/skills)")
     p_skill.set_defaults(func=_skill)
 
     p_browser = sub.add_parser("browser", help="start, stop or ask about the warm 3D browser worker "

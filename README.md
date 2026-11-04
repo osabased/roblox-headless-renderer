@@ -92,6 +92,8 @@ in the agent's context until it's used. Every JSON output is small, carries a `s
 name, and uses the same paths you pass back in.
 
 **Claude Code and Codex:** install the skill, and the agent knows when and how to use it.
+The installed file is a stub that has the agent run `rhr skill`, so the guide it reads
+is always the one for the rhr you have installed.
 
 ```sh
 rhr skill --install .claude/skills      # this project; ~/.claude/skills for all of them

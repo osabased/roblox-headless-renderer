@@ -2,8 +2,8 @@
 
 ## 1.0.0rc1+osabased.16 (fork)
 
-1.0.0rc1+osabased.15 with outputs that fit an agent's shell, and an exit 2 wherever a
-command had nothing to show.
+1.0.0rc1+osabased.15 with outputs that fit an agent's shell, an exit 2 wherever a
+command had nothing to show, and an installed skill that reads the guide from rhr.
 
 ### When upgrading
 
@@ -63,6 +63,11 @@ command had nothing to show.
   drew a blank screen and checked clean): stderr names what it built, and a story
   captured while a timer was still waiting says when the next is due and names
   `--story-time`.
+- **`rhr skill --install DIR` writes a stub**, not a copy of the guide: the skill's
+  name and description, and a body that has the agent run `rhr skill` and follow what
+  it prints. The installed skill no longer goes stale when rhr is upgraded. Run
+  `rhr skill --install` once more to replace a copy an older rhr wrote; `rhr skill`
+  prints the full guide as before.
 
 ### Added
 
